@@ -12,6 +12,7 @@ const startAccountBtn = $<HTMLButtonElement>("start-account-btn");
 const status = $("status");
 const progressList = $("progress-list");
 const registerDeviceBtn = $<HTMLButtonElement>("register-device-btn");
+const skipSecurityKeyBtn = $<HTMLButtonElement>("skip-security-key-btn");
 const codeConfirmPanel = $("code-confirm-panel");
 const codeConfirmHeading = $("code-confirm-heading");
 const headphoneConfirmEnrol = $<HTMLInputElement>("headphone-confirm-enrol");
@@ -49,6 +50,11 @@ function setProgress(label: string, text: string) {
   }
 }
 
+/** The skip option only ever makes sense at the security-key step. */
+function updateSkipButtonVisibility(label: string | null) {
+  skipSecurityKeyBtn.hidden = label !== "security_key";
+}
+
 startAccountBtn.addEventListener("click", async () => {
   alertRegion.innerHTML = "";
   const displayName = displayNameInput.value.trim();
@@ -76,6 +82,7 @@ startAccountBtn.addEventListener("click", async () => {
     progressList.hidden = false;
     registerDeviceBtn.hidden = false;
     nextDeviceLabel = "laptop";
+    updateSkipButtonVisibility(nextDeviceLabel);
     setProgress("laptop", "ready to register — select “Register this device”");
     announcePolite("Account started. Ready to register your laptop passkey.");
     moveFocusTo(registerDeviceBtn);
@@ -107,12 +114,14 @@ registerDeviceBtn.addEventListener("click", async () => {
 
     if (finish.accountStatus === "PENDING_CODE_CONFIRM") {
       registerDeviceBtn.hidden = true;
+      updateSkipButtonVisibility(null);
       codeConfirmPanel.hidden = false;
       moveFocusTo(codeConfirmHeading);
     } else {
       nextDeviceLabel =
         finish.accountStatus === "PENDING_PHONE" ? "phone" :
         finish.accountStatus === "PENDING_KEY" ? "security_key" : null;
+      updateSkipButtonVisibility(nextDeviceLabel);
       if (nextDeviceLabel) {
         setProgress(nextDeviceLabel, "ready to register — select “Register this device”");
         moveFocusTo(registerDeviceBtn);
@@ -121,6 +130,36 @@ registerDeviceBtn.addEventListener("click", async () => {
   } catch (err) {
     renderAlert(alertRegion, "Device registration was not completed.", describeAuthenticatorError(err));
     console.error(err);
+  }
+});
+
+skipSecurityKeyBtn.addEventListener("click", async () => {
+  if (!userId) return;
+  alertRegion.innerHTML = "";
+  try {
+    const result = await api<{ skipped: boolean; accountStatus: string }>("/register/dev-skip-security-key", {
+      userId,
+    });
+    const el = document.getElementById("progress-key");
+    if (el) el.textContent = "3. Roaming security key — skipped (testing only, no recovery tier from this device)";
+    announcePolite("Security key step skipped for testing. Moving to your first security code.");
+
+    if (result.accountStatus === "PENDING_CODE_CONFIRM") {
+      registerDeviceBtn.hidden = true;
+      updateSkipButtonVisibility(null);
+      codeConfirmPanel.hidden = false;
+      moveFocusTo(codeConfirmHeading);
+    }
+  } catch (err: any) {
+    if (err?.status === 404) {
+      renderAlert(
+        alertRegion,
+        "Skipping the security key isn't enabled on this server.",
+        "Set DEV_ALLOW_SKIP_SECURITY_KEY=true in server/.env and restart the server to enable it for testing."
+      );
+    } else {
+      renderAlert(alertRegion, "Could not skip this step.", "Try again.");
+    }
   }
 });
 

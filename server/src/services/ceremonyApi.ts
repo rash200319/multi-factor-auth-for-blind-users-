@@ -73,6 +73,18 @@ export function advanceAfterRegistration(userId: string, deviceLabel: string) {
   audit(userId, "lifecycle.advanced", { from: user.status, to: next, deviceLabel });
 }
 
+/**
+ * DEV-ONLY: advance past the security-key step without a real credential.
+ * Caller (register.ts) is responsible for checking DEV_ALLOW_SKIP_SECURITY_KEY
+ * and that status is actually PENDING_KEY before calling this.
+ */
+export function devSkipSecurityKey(userId: string) {
+  const user = getUser(userId);
+  if (!user || user.status !== "PENDING_KEY") return;
+  run("UPDATE users SET status = 'PENDING_CODE_CONFIRM' WHERE id = ?", [userId]);
+  audit(userId, "register.dev_skip_security_key", { from: "PENDING_KEY", to: "PENDING_CODE_CONFIRM" });
+}
+
 /** Call once the user has repeated C_1 back correctly (readme.md §6.1 step 8). */
 export function confirmFirstStepUpCode(userId: string) {
   const user = getUser(userId);

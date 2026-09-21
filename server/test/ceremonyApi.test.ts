@@ -9,6 +9,7 @@ import {
   confirmFirstStepUpCode,
   recordStepUpFailure,
   isLocked,
+  devSkipSecurityKey,
 } from "../src/services/ceremonyApi.js";
 
 function makeUser(): string {
@@ -62,4 +63,20 @@ test("fewer than 5 failures does not lock the account", () => {
     recordStepUpFailure(userId);
   }
   assert.equal(isLocked(getUser(userId)!), false);
+});
+
+test("devSkipSecurityKey advances PENDING_KEY straight to PENDING_CODE_CONFIRM", () => {
+  const userId = makeUser();
+  advanceAfterRegistration(userId, "laptop");
+  advanceAfterRegistration(userId, "phone");
+  assert.equal(getUser(userId)!.status, "PENDING_KEY");
+
+  devSkipSecurityKey(userId);
+  assert.equal(getUser(userId)!.status, "PENDING_CODE_CONFIRM");
+});
+
+test("devSkipSecurityKey is a no-op outside PENDING_KEY", () => {
+  const userId = makeUser(); // starts at PENDING_LAPTOP
+  devSkipSecurityKey(userId);
+  assert.equal(getUser(userId)!.status, "PENDING_LAPTOP");
 });

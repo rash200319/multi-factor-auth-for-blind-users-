@@ -6,9 +6,9 @@ import {
 } from "@simplewebauthn/server";
 import type { RegistrationResponseJSON } from "@simplewebauthn/types";
 import { row, run } from "../db/index.js";
-import { RP_NAME, RP_ID, ORIGIN, CHALLENGE_TTL_SECONDS } from "../config.js";
+import { RP_NAME, RP_ID, ORIGIN, CHALLENGE_TTL_SECONDS, DEV_ALLOW_SKIP_SECURITY_KEY } from "../config.js";
 import { audit } from "../services/audit.js";
-import { advanceAfterRegistration, expectedDeviceForStatus, getUser, getUserByEmail, reactivateViaRecovery } from "../services/ceremonyApi.js";
+import { advanceAfterRegistration, devSkipSecurityKey, expectedDeviceForStatus, getUser, getUserByEmail, reactivateViaRecovery } from "../services/ceremonyApi.js";
 import { validateAuthenticatorType } from "../services/authenticatorType.js";
 
 export const registerRouter = Router();
@@ -105,6 +105,31 @@ registerRouter.post("/begin", async (req, res) => {
 
   audit(userId, "register.begin", { deviceLabel });
   res.json({ options, deviceLabel });
+});
+
+/**
+ * DEV-ONLY. Skips the security-key step for testers who don't own a
+ * physical FIDO2 key. Only reachable when DEV_ALLOW_SKIP_SECURITY_KEY=true
+ * (server/.env) — off by default, and never appropriate to enable outside
+ * local development. An account that skips has no roaming-key recovery
+ * tier and no WCAG SC 3.3.8 alternative to the spoken step-up code
+ * (readme.md §5.2, §9.1) — written recovery codes still work as a
+ * fallback. Every use is audit-logged distinctly, on top of this.
+ */
+registerRouter.post("/dev-skip-security-key", (req, res) => {
+  if (!DEV_ALLOW_SKIP_SECURITY_KEY) {
+    return res.status(404).json({ error: "not found" }); // pretend the route doesn't exist when disabled
+  }
+  const userId = String(req.body?.userId ?? "");
+  const user = getUser(userId);
+  if (!user) return res.status(404).json({ error: "unknown user" });
+  if (user.status !== "PENDING_KEY") {
+    return res.status(409).json({ error: "security key is not the current step", status: user.status });
+  }
+
+  devSkipSecurityKey(userId);
+  const updated = getUser(userId)!;
+  res.json({ skipped: true, accountStatus: updated.status });
 });
 
 /** readme.md §6.1 steps 4-6 — verify attestation, persist public key only, advance lifecycle. */
