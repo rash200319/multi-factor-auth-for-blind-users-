@@ -68,7 +68,19 @@ registerRouter.post("/begin", async (req, res) => {
     attestationType: "none",
     excludeCredentials,
     authenticatorSelection: {
-      residentKey: "required",
+      // Required only for the laptop: that's the credential /auth/begin's
+      // no-username discoverable sign-in actually depends on finding.
+      // For phone/security_key, "required" forces a heavier, more
+      // failure-prone finalization step over the cross-device/hybrid path
+      // (this is a plausible contributor to Windows' "There was a problem
+      // saving your passkey" error) for no benefit here: the phone is a
+      // second, equally-valid Factor-1 option (the laptop alone still
+      // covers discoverable sign-in), and the security key is only ever
+      // looked up by its stored credential ID (/stepup/key/*, recovery),
+      // never via discoverable/no-username lookup. "preferred" still
+      // yields a resident credential on virtually every modern phone
+      // passkey implementation regardless.
+      residentKey: deviceLabel === "laptop" ? "required" : "preferred",
       userVerification: "required",
       // Steers the browser/OS picker toward the right kind of authenticator
       // up front. This alone can't force "phone specifically" (both a phone
