@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Create account — MFA for Blind Users</title>
+  <link rel="stylesheet" href="/src/style.css" />
+</head>
+<body>
+  <nav aria-label="Account">
+    <a href="/index.html">Sign in</a>
+    <a href="/enrol.html">Create account</a>
+    <a href="/recover.html">Recover account</a>
+  </nav>
+  <main id="main">
+    <h1 id="page-title" tabindex="-1">Create account</h1>
+    <p>You will register three authenticators in order: this laptop, your phone, and a roaming security key. All three are required before the account can be used — this is what removes any single point of failure.</p>
+
+    <div id="name-step">
+      <div class="field">
+        <label for="display-name">Your name</label>
+        <input type="text" id="display-name" autocomplete="name" />
+      </div>
+      <button id="start-account-btn" type="button">Start enrolment</button>
+    </div>
+
+    <div id="status" class="status-box" aria-live="polite" hidden></div>
+
+    <ol class="step-list" id="progress-list" hidden>
+      <li id="progress-laptop">1. Laptop passkey — not started</li>
+      <li id="progress-phone">2. Phone authenticator — not started</li>
+      <li id="progress-key">3. Roaming security key — not started</li>
+      <li id="progress-code">4. Confirm your spoken security code — not started</li>
+    </ol>
+
+    <button id="register-device-btn" type="button" hidden>Register this device</button>
+
+    <div id="code-confirm-panel" hidden>
+      <h2 id="code-confirm-heading" tabindex="-1">Confirm your security code</h2>
+      <p>Confirm you are wearing headphones, then we will speak your first security code. Repeat it back to prove you captured it correctly. Write it down somewhere private if you want a backup — it will not be shown on screen.</p>
+      <div class="field">
+        <label for="headphone-confirm-enrol">
+          <input type="checkbox" id="headphone-confirm-enrol" />
+          I am wearing headphones or a private headset right now
+        </label>
+      </div>
+      <button id="speak-first-code-btn" type="button">Speak my security code</button>
+      <div class="field" style="margin-top:1rem;">
+        <label for="repeat-code-input">Type the code back</label>
+        <input type="text" id="repeat-code-input" autocomplete="off" />
+      </div>
+      <button id="confirm-capture-btn" type="button">Confirm</button>
+    </div>
+
+    <div id="recovery-codes-panel" hidden>
+      <h2 tabindex="-1" id="recovery-codes-heading">Your written recovery codes</h2>
+      <p>These eight codes are shown once. Save them somewhere private (password manager, refreshable braille display, or printed and stored securely). Each code works once; using any one invalidates the rest.</p>
+      <ul id="recovery-codes-list"></ul>
+      <button id="recovery-codes-done-btn" type="button">I have saved my recovery codes</button>
+    </div>
+
+    <div id="alert-region"></div>
+  </main>
+  <script type="module" src="/src/pages/Enrol.ts"></script>
+</body>
+</html>
