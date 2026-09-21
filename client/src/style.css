@@ -1,0 +1,98 @@
+/*
+  Minimal, high-contrast, keyboard-focus-visible styling. This is a demo
+  skin, not a design system — the accessibility requirements that matter
+  (focus order, live regions, alert roles, timers) live in the TS modules,
+  not here. Nothing here should ever be load-bearing for a screen reader.
+*/
+
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff;
+  --fg: #111111;
+  --accent: #0b5fff;
+  --danger: #b3261e;
+  --border: #444444;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  background: var(--bg);
+  color: var(--fg);
+  line-height: 1.5;
+}
+
+main {
+  max-width: 40rem;
+  margin: 0 auto;
+  padding: 2rem 1rem;
+}
+
+h1, h2 { line-height: 1.2; }
+
+button, input {
+  font-size: 1rem;
+  padding: 0.6rem 0.9rem;
+  border: 2px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg);
+}
+
+button {
+  cursor: pointer;
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+
+button:hover { filter: brightness(1.1); }
+
+button:focus-visible,
+input:focus-visible,
+a:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+}
+
+label {
+  display: block;
+  margin-bottom: 0.3rem;
+  font-weight: 600;
+}
+
+.field { margin-bottom: 1.25rem; }
+
+[role="alert"] {
+  color: var(--danger);
+  border: 2px solid var(--danger);
+  border-radius: 6px;
+  padding: 0.75rem;
+  margin-top: 0.75rem;
+  font-weight: 600;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.status-box {
+  border: 2px solid var(--border);
+  border-radius: 6px;
+  padding: 1rem;
+  margin: 1rem 0;
+}
+
+.step-list { padding-left: 1.25rem; }
+
+nav a { margin-right: 1rem; }
