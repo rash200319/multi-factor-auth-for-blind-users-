@@ -27,21 +27,35 @@ if (!existsSync(CLOUDFLARED)) {
 }
 if (!existsSync(LOG_DIR)) mkdirSync(LOG_DIR);
 
-const URL_RE = /https:\/\/[a-z0-9-]+\.trycloudflare\.com/;
+// A real quick-tunnel hostname is a random string of hyphenated words,
+// e.g. "corrections-half-ownership-babies.trycloudflare.com". Explicitly
+// excludes "api.trycloudflare.com" — cloudflared's own provisioning API,
+// which shows up in its own log lines (including error messages when
+// provisioning fails) and must never be mistaken for an actual tunnel.
+const URL_RE = /https:\/\/(?!api\.trycloudflare\.com)[a-z0-9]+(?:-[a-z0-9]+)+\.trycloudflare\.com/;
 
 function startTunnel(name, port) {
   const logPath = join(LOG_DIR, `${name}.log`);
   const fd = openSync(logPath, "w");
+  const state = { exited: false, exitCode: null };
   const child = spawn(CLOUDFLARED, ["tunnel", "--url", `http://localhost:${port}`], {
     detached: true,
     stdio: ["ignore", fd, fd],
     windowsHide: true,
   });
+  // Recorded even though the process is detached — the listener itself
+  // doesn't require staying attached, and lets waitForUrl fail fast
+  // instead of polling the full timeout when cloudflared has already died.
+  child.on("exit", (code) => {
+    state.exited = true;
+    state.exitCode = code;
+  });
   child.unref();
-  return { name, port, logPath, pid: child.pid };
+  return { name, port, logPath, pid: child.pid, state };
 }
 
-function waitForUrl(logPath, timeoutMs = 30000) {
+function waitForUrl(tunnel, timeoutMs = 30000) {
+  const { logPath, state, name } = tunnel;
   return new Promise((resolve, reject) => {
     const start = Date.now();
     const poll = () => {
@@ -49,6 +63,12 @@ function waitForUrl(logPath, timeoutMs = 30000) {
         const content = readFileSync(logPath, "utf8");
         const match = content.match(URL_RE);
         if (match) return resolve(match[0]);
+      }
+      if (state.exited) {
+        const tail = existsSync(logPath) ? readFileSync(logPath, "utf8").split(/\r?\n/).slice(-5).join("\n") : "";
+        return reject(
+          new Error(`The ${name} tunnel process exited (code ${state.exitCode}) before producing a URL. Last log lines:\n${tail}`)
+        );
       }
       if (Date.now() - start > timeoutMs) {
         return reject(new Error(`Timed out waiting for a tunnel URL in ${logPath}`));
@@ -99,17 +119,38 @@ function killPreviousTunnels() {
   }
 }
 
+async function attemptTunnels() {
+  const client = startTunnel("client", 5190);
+  const server = startTunnel("server", 4000);
+  const [clientUrl, serverUrl] = await Promise.all([waitForUrl(client), waitForUrl(server)]);
+  return { client, server, clientUrl, serverUrl };
+}
+
 async function main() {
   killPreviousTunnels();
   console.log("Starting cloudflared tunnels (this can take a few seconds)...");
-  const client = startTunnel("client", 5190);
-  const server = startTunnel("server", 4000);
 
-  const [clientUrl, serverUrl] = await Promise.all([
-    waitForUrl(client.logPath),
-    waitForUrl(server.logPath),
-  ]);
+  let result;
+  const MAX_ATTEMPTS = 3;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      result = await attemptTunnels();
+      break;
+    } catch (err) {
+      console.error(`Attempt ${attempt}/${MAX_ATTEMPTS} failed: ${err.message}`);
+      killPreviousTunnels(); // clear whatever half-started this attempt before retrying
+      if (attempt === MAX_ATTEMPTS) {
+        console.error("");
+        console.error("Cloudflare's quick-tunnel provisioning API didn't respond in time after several tries.");
+        console.error("This is usually transient — wait a minute and re-run: node tools/tunnel.mjs");
+        console.error("server/.env and client/.env.local were NOT changed.");
+        process.exit(1);
+      }
+      await new Promise((r) => setTimeout(r, 2000));
+    }
+  }
 
+  const { client, server, clientUrl, serverUrl } = result;
   const clientHost = new URL(clientUrl).host;
 
   rewriteEnvFile(join(ROOT, "server", ".env"), {

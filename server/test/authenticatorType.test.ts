@@ -7,6 +7,15 @@ test("laptop step accepts an internal (platform) authenticator", () => {
   assert.equal(result.ok, true);
 });
 
+test("laptop step accepts a Windows Hello PIN that reports both internal AND hybrid transports", () => {
+  // Real-world case: modern Windows Hello passkeys often list 'hybrid' as a
+  // future capability alongside 'internal', even when registered locally
+  // via PIN on this exact device. authenticatorAttachment='platform' is
+  // what settles it, not the presence of 'hybrid' in transports.
+  const result = validateAuthenticatorType("laptop", ["internal", "hybrid"], "platform");
+  assert.equal(result.ok, true);
+});
+
 test("laptop step rejects a phone paired over hybrid transport", () => {
   const result = validateAuthenticatorType("laptop", ["hybrid"], "cross-platform");
   assert.equal(result.ok, false);
@@ -53,7 +62,12 @@ test("replacement step accepts anything", () => {
   assert.equal(validateAuthenticatorType("replacement", undefined, undefined).ok, true);
 });
 
-test("no transport signal at all does not block enrolment", () => {
-  const result = validateAuthenticatorType("phone", undefined, undefined);
+test("no signal at all does not block enrolment", () => {
+  assert.equal(validateAuthenticatorType("phone", undefined, undefined).ok, true);
+  assert.equal(validateAuthenticatorType("laptop", [], undefined).ok, true);
+});
+
+test("cross-platform attachment with both hybrid and physical transports is ambiguous and not blocked", () => {
+  const result = validateAuthenticatorType("phone", ["hybrid", "usb"], "cross-platform");
   assert.equal(result.ok, true);
 });
