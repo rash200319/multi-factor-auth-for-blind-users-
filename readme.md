@@ -12,6 +12,54 @@ mapping, rejected alternatives).
 
 ---
 
+## 0. Status — this is now a working implementation
+
+Milestones 1-8 from §11 below are built and passing. What that means
+concretely:
+
+| Area | Status |
+|---|---|
+| Registration ceremony (laptop, phone, security key) | Implemented — `server/src/routes/register.ts` |
+| Account lifecycle gate (unusable until all 3 + `C_1`) | Implemented — `server/src/services/ceremonyApi.ts` |
+| Routine login (Factors 1+2, discoverable credential) | Implemented — `server/src/routes/auth.ts` |
+| Risk engine + step-up ceremony (spoken code) | Implemented — `server/src/services/riskEngine.ts`, `server/src/routes/stepup.ts` |
+| Security-key alternative to the spoken code (SC 3.3.8) | Implemented — `POST /stepup/key/begin` / `/key/finish` |
+| Recovery hierarchy (device → key → written codes) | Implemented — `server/src/routes/recovery.ts` |
+| Audit log + 5-failure lockout | Implemented — `server/src/services/audit.ts`, `ceremonyApi.ts` |
+| Accessible interaction layer (focus, `aria-live`, alerts, timer) | Implemented — `client/src/a11y/`, `client/src/pages/` |
+| Automated unit tests (18/18 passing) | `server/test/*.test.ts` — see `docs/verification-plan.md` |
+| WCAG manual audit, real screen-reader test matrix, acoustic containment measurement | **Not yet run — needs a human.** See `docs/verification-plan.md` §"What still requires a human". |
+
+Run it yourself:
+
+```bash
+npm install                    # see the Windows note below before running this
+npm run dev:server             # http://localhost:4000
+npm run dev:client             # http://localhost:5173 — open this in a browser
+```
+
+Then open `http://localhost:5173/enrol.html` to create an account (you'll
+need a device with a fingerprint sensor / Windows Hello / Touch ID, plus a
+second device and a FIDO2 security key to complete all three registrations),
+or `index.html` to sign in.
+
+Before your first `npm install`, generate a session secret and put it in
+`server/.env` (a working demo one is already committed there — replace it for
+anything beyond local development):
+
+```bash
+node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
+```
+
+**Windows note:** if you install dependencies from a Git Bash / MSYS shell,
+npm's postinstall scripts (esbuild, vite) can fail with
+`ERR_INVALID_ARG_TYPE: The "file" argument must be of type string` because
+`COMSPEC` isn't set in that shell. Run `npm install` from PowerShell or
+`cmd.exe` instead — same repo, no code changes needed, this is purely a shell
+environment issue.
+
+---
+
 ## 1. What this system is
 
 A WebAuthn-based MFA system for blind users operating a web app through a
@@ -74,27 +122,29 @@ These come directly from the threat model (WS2) and accessibility analysis
 
 ---
 
-## 3. Recommended stack
+## 3. Stack (as implemented)
 
-The design is stack-agnostic (WebAuthn + TLS 1.3 + standard KDFs). Suggested
-choices for a course implementation, optimized for a working WebAuthn +
-accessible-audio demo without reinventing primitives:
+The design is stack-agnostic (WebAuthn + TLS 1.3 + standard KDFs). These are
+the actual choices made for this build, in `server/` and `client/`:
 
 | Layer | Choice | Why |
 |---|---|---|
-| WebAuthn server | Node.js + [`@simplewebauthn/server`](https://simplewebauthn.dev/) | Handles attestation/assertion verification, origin/rp_id binding, challenge management |
-| WebAuthn client | [`@simplewebauthn/browser`](https://simplewebauthn.dev/) | Wraps `navigator.credentials.create/get` |
-| Backend framework | Express (or Fastify) | Minimal, easy to map 1:1 onto the ceremony API below |
-| Database | PostgreSQL (SQLite acceptable for the course build) | Relational fit for credential/recovery/audit tables |
-| Password/code hashing | Argon2id via `argon2` npm package | Matches PDF §9.2 / D2 recovery-code store spec |
-| Session/token encryption | `jose` (JWE) or server-side session store | `Enc_key(...)` in the ceremony pseudocode = encrypted session token |
-| Frontend | Plain HTML/CSS/JS or React, screen-reader tested | Must pass with JS DOM but no visual rendering assumptions |
-| Speech delivery (step-up code) | Server-generated audio via TTS (e.g. OS/browser Speech Synthesis API triggered client-side after containment check) | Code is *spoken*, never typed by the server into a visible field |
-| Audio-route check | `navigator.mediaDevices.enumerateDevices()` + explicit user confirmation ("Confirm you are wearing headphones") | PDF flags automated detection as weak (§13.2) — pair with a declared control, don't rely on the API alone |
-| TLS | 1.3 only | Required by every ceremony in the design |
+| WebAuthn server | Node.js 22 + [`@simplewebauthn/server`](https://simplewebauthn.dev/) v10 | Handles attestation/assertion verification, origin/rp_id binding, challenge management |
+| WebAuthn client | [`@simplewebauthn/browser`](https://simplewebauthn.dev/) v10 | Wraps `navigator.credentials.create/get` |
+| Backend framework | Express 4 | Minimal, maps 1:1 onto the ceremony API in §6 |
+| Database | **`node:sqlite`** (Node's built-in experimental SQLite, no native build step) | Zero-config on any platform — no Postgres install, no `node-gyp`/MSVC toolchain needed. Swap for Postgres in `server/src/db/index.ts` if you need concurrent writers. |
+| Password/code hashing | **`@node-rs/argon2`** (napi-rs, prebuilt binaries) — not the `argon2` package, which needs a native toolchain | Matches PDF §9.2 / D2 recovery-code store spec |
+| Session/token encryption | `jose` (`EncryptJWT`/`jwtDecrypt`, A256GCM) | `Enc_key(...)` in the ceremony pseudocode = the encrypted session cookie in `server/src/services/session.ts` |
+| Frontend | Vite + vanilla TypeScript, 3 HTML entry points (`index.html`, `enrol.html`, `recover.html`) | No framework runtime between the DOM and the accessibility rules in §8 |
+| Speech delivery (step-up code) | Browser `SpeechSynthesisUtterance` via `client/src/audio/routeCheck.ts` | Code is *spoken* client-side after the route check passes, never typed by the server into a visible field |
+| Audio-route check | `navigator.mediaDevices.enumerateDevices()` **plus** an explicit confirmation checkbox — the API alone is trusted for nothing | PDF flags automated detection as weak (§13.2) — see `RouteCheckResult` in `routeCheck.ts` |
+| Word list | Real EFF large wordlist (7,776 words), fetched from eff.org and committed as `server/src/data/wordlist.json` | Matches PDF §7.2 exactly, not a placeholder subset |
+| TLS | Expected from a reverse proxy in production; dev server runs plain HTTP on `localhost` | `server/src/index.ts` logs a reminder on boot |
 
-If your team already has a stack mandated by the course, swap layers 1:1 —
-the ceremony contracts in §6 are the part that must not change.
+The word "recommended" in this section used to mean "not yet chosen." It's
+now "this is what's in the repo" — swap a layer by editing the corresponding
+file in `server/src/services/` or `client/src/`; the ceremony contracts in §6
+are the part that must not change.
 
 ---
 
@@ -104,33 +154,42 @@ the ceremony contracts in §6 are the part that must not change.
 multi-factor-auth-for-blind-users-/
 ├── GROUP_Unified_Design.pdf        # source design doc (already present at repo root's parent)
 ├── readme.md                       # this file
+├── package.json                    # npm workspaces root (server + client)
 ├── server/
+│   ├── .env / .env.example / .env.test
 │   ├── src/
-│   │   ├── index.ts                # app entry, TLS, route mounting
+│   │   ├── index.ts                # app entry, route mounting
+│   │   ├── config.ts                # RP_ID, ORIGIN, PORT, challenge TTL
 │   │   ├── routes/
-│   │   │   ├── register.ts         # /register/begin, /register/finish
+│   │   │   ├── register.ts         # /register/start-account, /begin, /finish
 │   │   │   ├── auth.ts             # /auth/begin, /auth/finish
-│   │   │   ├── stepup.ts           # /stepup/challenge, /stepup/verify
-│   │   │   └── recovery.ts         # /recovery/*
+│   │   │   ├── stepup.ts           # /stepup/challenge, /verify, /confirm-capture, /key/begin, /key/finish
+│   │   │   ├── recovery.ts         # /recovery/codes/issue, /recovery/redeem
+│   │   │   └── session.ts          # /me, /logout
 │   │   ├── services/
-│   │   │   ├── ceremonyApi.ts      # verifier state machine (Figure 6)
+│   │   │   ├── ceremonyApi.ts      # account lifecycle state machine (Figure 6/10)
 │   │   │   ├── riskEngine.ts       # low/high risk classification -> step-up trigger
 │   │   │   ├── stepupCode.ts       # issue / hash / verify / rotate C_n
-│   │   │   └── recoveryCodes.ts    # written recovery code lifecycle
-│   │   ├── models/                 # credential store, recovery store, audit log
-│   │   └── db/                     # migrations, schema
-│   └── test/
+│   │   │   ├── recoveryCodes.ts    # written recovery code lifecycle
+│   │   │   ├── session.ts          # encrypted (JWE) session tokens
+│   │   │   └── audit.ts            # append-only audit log writes
+│   │   ├── data/wordlist.json      # real EFF large wordlist, 7,776 words
+│   │   └── db/                     # schema.sql + node:sqlite wrapper
+│   └── test/                       # 18 unit tests, node:test
 ├── client/
-│   ├── src/
-│   │   ├── pages/SignIn.tsx
-│   │   ├── pages/Enrol.tsx
-│   │   ├── components/StepUpPrompt.tsx
-│   │   ├── a11y/                   # focus management, aria-live helpers
-│   │   └── audio/routeCheck.ts     # private-audio-route confirmation
-│   └── test/
+│   ├── index.html                  # sign-in
+│   ├── enrol.html                  # enrolment (3 devices + first code)
+│   ├── recover.html                # written-recovery-code redemption
+│   ├── vite.config.ts
+│   └── src/
+│       ├── api.ts                  # fetch wrapper
+│       ├── style.css
+│       ├── pages/{SignIn,Enrol,Recover}.ts
+│       ├── a11y/{announce,timer}.ts  # focus, live regions, alert roles, SC 2.2.1 timer
+│       └── audio/routeCheck.ts     # private-route confirmation + speech synthesis
 └── docs/
-    ├── threat-model.md             # summarised from PDF §4
-    └── verification-plan.md        # summarised from PDF §12
+    ├── threat-model.md             # summarised from PDF §4, mapped to code locations
+    └── verification-plan.md        # PDF §12 as a Definition of Done, with actual run status
 ```
 
 ---
