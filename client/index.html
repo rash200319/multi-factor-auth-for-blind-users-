@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sign in — MFA for Blind Users</title>
+  <link rel="stylesheet" href="/src/style.css" />
+</head>
+<body>
+  <nav aria-label="Account">
+    <a href="/index.html">Sign in</a>
+    <a href="/enrol.html">Create account</a>
+    <a href="/recover.html">Recover account</a>
+  </nav>
+  <main id="main">
+    <h1 id="page-title" tabindex="-1">Sign in</h1>
+    <p>Sign-in uses your registered laptop or phone. Touch your fingerprint sensor when prompted — no username or password is needed.</p>
+
+    <div id="status" class="status-box" aria-live="polite">Ready to sign in.</div>
+
+    <button id="signin-btn" type="button">Sign in with fingerprint</button>
+
+    <div id="stepup-panel" hidden>
+      <h2 id="stepup-heading" tabindex="-1">Additional verification required</h2>
+      <p>This action needs a spoken security code. Confirm you are wearing headphones before we speak it — the code is never shown on screen.</p>
+      <div class="field">
+        <label for="headphone-confirm">
+          <input type="checkbox" id="headphone-confirm" />
+          I am wearing headphones or a private headset right now
+        </label>
+      </div>
+      <button id="speak-code-btn" type="button">Speak my security code</button>
+      <div class="field" style="margin-top:1rem;">
+        <label for="code-input">Enter the security code you just heard</label>
+        <input type="text" id="code-input" autocomplete="off" placeholder="e.g. harbour-violin-sandbar" />
+      </div>
+      <button id="verify-code-btn" type="button">Verify code</button>
+      <button id="use-key-instead-btn" type="button">Use my security key instead</button>
+    </div>
+
+    <div id="alert-region"></div>
+  </main>
+  <script type="module" src="/src/pages/SignIn.ts"></script>
+</body>
+</html>
