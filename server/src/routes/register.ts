@@ -9,6 +9,7 @@ import { row, run } from "../db/index.js";
 import { RP_NAME, RP_ID, ORIGIN, CHALLENGE_TTL_SECONDS } from "../config.js";
 import { audit } from "../services/audit.js";
 import { advanceAfterRegistration, expectedDeviceForStatus, getUser, getUserByEmail, reactivateViaRecovery } from "../services/ceremonyApi.js";
+import { validateAuthenticatorType } from "../services/authenticatorType.js";
 
 export const registerRouter = Router();
 
@@ -69,6 +70,11 @@ registerRouter.post("/begin", async (req, res) => {
     authenticatorSelection: {
       residentKey: "required",
       userVerification: "required",
+      // Steers the browser/OS picker toward the right kind of authenticator
+      // up front. This alone can't force "phone specifically" (both a phone
+      // and a physical key are "cross-platform"), so /finish still verifies
+      // the actual transport used — this just reduces wrong picks in the UI.
+      authenticatorAttachment: deviceLabel === "laptop" ? "platform" : deviceLabel === "replacement" ? undefined : "cross-platform",
     },
     // @simplewebauthn/server defaults this to 60s, which is too short for a
     // cross-device (QR + Bluetooth) phone registration — scanning, pairing,
@@ -133,6 +139,21 @@ registerRouter.post("/finish", async (req, res) => {
 
   const deviceLabel = expectedDeviceForStatus(user.status);
   const { credentialID, credentialPublicKey, counter, aaguid } = verification.registrationInfo;
+
+  // Detect what was actually registered instead of trusting enrolment
+  // order alone — WebAuthn reports how the authenticator was reached
+  // (transports) and its attachment, which tells laptop/phone/key apart.
+  if (deviceLabel) {
+    const check = validateAuthenticatorType(deviceLabel, response.response.transports, response.authenticatorAttachment);
+    if (!check.ok) {
+      audit(userId, "register.finish.wrong_authenticator_type", {
+        deviceLabel,
+        transports: response.response.transports,
+        authenticatorAttachment: response.authenticatorAttachment,
+      });
+      return res.status(400).json({ error: check.reason });
+    }
+  }
 
   run(
     `INSERT INTO credentials (id, user_id, cred_id, public_key, sign_count, aaguid, transports, device_label, role)

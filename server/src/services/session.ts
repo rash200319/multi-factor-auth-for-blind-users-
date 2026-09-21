@@ -48,10 +48,22 @@ export async function readSession(token: string): Promise<SessionClaims | null> 
   }
 }
 
+// Same-site localhost dev (client and server share the "localhost" site,
+// just different ports) works fine with the strict defaults below. Once the
+// client is reached through an HTTPS tunnel on its own domain (e.g. testing
+// a phone's cross-device passkey flow), client and server become genuinely
+// cross-site, and a Strict/Lax cookie set by a fetch() response won't be
+// stored or sent at all — SameSite=None requires Secure, which requires the
+// cookie-setting response to itself be over HTTPS. Set COOKIE_SAMESITE=none
+// and COOKIE_SECURE=true in server/.env for that scenario (see docs in
+// tools/README.md); leave both unset for ordinary localhost dev.
+const sameSite = (process.env.COOKIE_SAMESITE as "strict" | "lax" | "none" | undefined) ?? "strict";
+const secure = process.env.COOKIE_SECURE === "true" || process.env.NODE_ENV === "production" || sameSite === "none";
+
 export const sessionCookieName = SESSION_COOKIE;
 export const sessionCookieOptions = {
   httpOnly: true,
-  sameSite: "strict" as const,
-  secure: process.env.NODE_ENV === "production",
+  sameSite,
+  secure,
   path: "/",
 };

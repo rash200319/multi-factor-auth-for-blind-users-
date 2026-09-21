@@ -30,6 +30,12 @@ const DEVICE_STEP_LABELS: Record<string, string> = {
   security_key: "Roaming security key",
 };
 
+const DEVICE_STEP_PROMPTS: Record<string, string> = {
+  laptop: "Touch this laptop's fingerprint sensor now, or complete Windows Hello, to register it.",
+  phone: "A QR code and Bluetooth prompt will appear. Scan it with your phone, then confirm with your phone's fingerprint or face unlock. Keep both devices unlocked and nearby — this can take a little while on the first try.",
+  security_key: "Insert or tap your physical security key now, and touch it if it flashes.",
+};
+
 let userId: string | null = null;
 let nextDeviceLabel: string | null = null;
 
@@ -89,7 +95,7 @@ registerDeviceBtn.addEventListener("click", async () => {
   alertRegion.innerHTML = "";
   try {
     const begin = await api<{ options: any; deviceLabel: string }>("/register/begin", { userId });
-    announcePolite(`Touch your fingerprint sensor to register your ${DEVICE_STEP_LABELS[begin.deviceLabel]}.`);
+    announcePolite(DEVICE_STEP_PROMPTS[begin.deviceLabel] ?? `Registering your ${DEVICE_STEP_LABELS[begin.deviceLabel]}.`);
     const response = await startRegistration(begin.options);
     const finish = await api<{ deviceLabel: string; accountStatus: string }>("/register/finish", {
       userId,
