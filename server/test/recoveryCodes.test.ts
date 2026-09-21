@@ -6,7 +6,7 @@ import { issueRecoveryCodeSet, verifyAndConsumeRecoveryCode } from "../src/servi
 
 function makeUser(): string {
   const id = randomUUID();
-  run("INSERT INTO users (id, display_name, status) VALUES (?, ?, 'ACTIVE')", [id, "Test User"]);
+  run("INSERT INTO users (id, display_name, email, status) VALUES (?, ?, ?, 'ACTIVE')", [id, "Test User", `${id}@example.test`]);
   return id;
 }
 

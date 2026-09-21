@@ -2,8 +2,9 @@
 -- SQLite via node:sqlite. No private key, no reversible secret, is ever stored.
 
 CREATE TABLE IF NOT EXISTS users (
-  id              TEXT PRIMARY KEY,
+  id              TEXT PRIMARY KEY,       -- internal key only; never shown to the user
   display_name    TEXT NOT NULL,
+  email           TEXT NOT NULL UNIQUE COLLATE NOCASE, -- human-facing identifier, used for recovery lookup
   -- PENDING_LAPTOP -> PENDING_PHONE -> PENDING_KEY -> PENDING_CODE_CONFIRM -> ACTIVE
   -- -> LOCKED (5 failures) -> RECOVERY -> ACTIVE
   status          TEXT NOT NULL DEFAULT 'PENDING_LAPTOP',

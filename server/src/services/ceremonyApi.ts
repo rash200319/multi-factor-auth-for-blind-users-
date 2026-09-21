@@ -19,6 +19,7 @@ export type UserStatus =
 export interface UserRow {
   id: string;
   display_name: string;
+  email: string;
   status: UserStatus;
   failed_stepup_attempts: number;
   locked_until: string | null;
@@ -26,6 +27,11 @@ export interface UserRow {
 
 export function getUser(userId: string): UserRow | undefined {
   return row<UserRow>("SELECT * FROM users WHERE id = ?", [userId]);
+}
+
+/** Recovery is looked up by email, not the internal id — nobody should have to remember a UUID. */
+export function getUserByEmail(email: string): UserRow | undefined {
+  return row<UserRow>("SELECT * FROM users WHERE email = ? COLLATE NOCASE", [email]);
 }
 
 const REGISTRATION_ORDER: Record<UserStatus, UserStatus | null> = {

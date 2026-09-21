@@ -120,6 +120,7 @@ stepupRouter.post("/key/begin", async (req, res) => {
     rpID: RP_ID,
     userVerification: "required",
     allowCredentials: [{ id: keyCred.cred_id }],
+    timeout: CHALLENGE_TTL_SECONDS * 1000, // see register.ts — same 60s-default issue applies here
   });
   const attemptId = randomUUID();
   keyChallenges.set(attemptId, {

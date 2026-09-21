@@ -1,5 +1,5 @@
 import { startRegistration } from "@simplewebauthn/browser";
-import { api } from "../api.js";
+import { api, describeAuthenticatorError } from "../api.js";
 import { announcePolite, moveFocusTo, renderAlert } from "../a11y/announce.js";
 import { verifyPrivateAudioRoute, speakCode } from "../audio/routeCheck.js";
 
@@ -7,6 +7,7 @@ const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as 
 
 const nameStep = $("name-step");
 const displayNameInput = $<HTMLInputElement>("display-name");
+const emailInput = $<HTMLInputElement>("email-input");
 const startAccountBtn = $<HTMLButtonElement>("start-account-btn");
 const status = $("status");
 const progressList = $("progress-list");
@@ -45,24 +46,41 @@ function setProgress(label: string, text: string) {
 startAccountBtn.addEventListener("click", async () => {
   alertRegion.innerHTML = "";
   const displayName = displayNameInput.value.trim();
+  const email = emailInput.value.trim();
   if (!displayName) {
     renderAlert(alertRegion, "Please enter your name.", "Then select Start enrolment again.");
     return;
   }
+  if (!email) {
+    renderAlert(alertRegion, "Please enter your email.", "This is what you'll use for account recovery — then select Start enrolment again.");
+    return;
+  }
   try {
-    const result = await api<{ userId: string; status: string }>("/register/start-account", { displayName });
+    // userId is an internal key kept only in this page's memory for the rest
+    // of enrolment — the user is never asked to remember it. Email is the
+    // identifier they'll actually use later, for recovery.
+    const result = await api<{ userId: string; email: string; status: string }>("/register/start-account", {
+      displayName,
+      email,
+    });
     userId = result.userId;
     nameStep.hidden = true;
     status.hidden = false;
-    status.textContent = `Account started. Your account ID is ${userId}. Save this somewhere — you will need it to sign in from a new browser and for account recovery.`;
+    status.textContent = `Account started for ${result.email}. Sign-in itself needs no password or ID — it recognises your registered device. Keep this email for account recovery.`;
     progressList.hidden = false;
     registerDeviceBtn.hidden = false;
     nextDeviceLabel = "laptop";
     setProgress("laptop", "ready to register — select “Register this device”");
     announcePolite("Account started. Ready to register your laptop passkey.");
     moveFocusTo(registerDeviceBtn);
-  } catch {
-    renderAlert(alertRegion, "Could not start enrolment.", "Try again in a moment.");
+  } catch (err: any) {
+    if (err?.status === 409) {
+      renderAlert(alertRegion, "An account with that email already exists.", "Sign in instead, or use a different email.");
+    } else if (err?.status === 400) {
+      renderAlert(alertRegion, "Please enter a valid email address.", "Then select Start enrolment again.");
+    } else {
+      renderAlert(alertRegion, "Could not start enrolment.", "Try again in a moment.");
+    }
   }
 });
 
@@ -95,7 +113,7 @@ registerDeviceBtn.addEventListener("click", async () => {
       }
     }
   } catch (err) {
-    renderAlert(alertRegion, "Device registration was not completed.", "Try again — make sure you complete the fingerprint prompt.");
+    renderAlert(alertRegion, "Device registration was not completed.", describeAuthenticatorError(err));
     console.error(err);
   }
 });

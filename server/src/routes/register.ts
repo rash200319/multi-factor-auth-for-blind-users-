@@ -8,22 +8,36 @@ import type { RegistrationResponseJSON } from "@simplewebauthn/types";
 import { row, run } from "../db/index.js";
 import { RP_NAME, RP_ID, ORIGIN, CHALLENGE_TTL_SECONDS } from "../config.js";
 import { audit } from "../services/audit.js";
-import { advanceAfterRegistration, expectedDeviceForStatus, getUser, reactivateViaRecovery } from "../services/ceremonyApi.js";
+import { advanceAfterRegistration, expectedDeviceForStatus, getUser, getUserByEmail, reactivateViaRecovery } from "../services/ceremonyApi.js";
 
 export const registerRouter = Router();
 
-/** Step 0 (not in the PDF ceremony diagram, but required to have a user_id to bind challenges to). */
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/**
+ * Step 0 (not in the PDF ceremony diagram, but required to have a user_id
+ * to bind challenges to). The internal `userId` (a UUID) is returned only
+ * for the client to hold in memory for the rest of THIS enrolment session
+ * — it is never something the user is asked to remember. Email is the
+ * human-facing identifier, used later for account recovery.
+ */
 registerRouter.post("/start-account", (req, res) => {
   const displayName = String(req.body?.displayName ?? "").trim();
+  const email = String(req.body?.email ?? "").trim().toLowerCase();
+
   if (!displayName) return res.status(400).json({ error: "displayName is required" });
+  if (!EMAIL_RE.test(email)) return res.status(400).json({ error: "a valid email is required" });
+  if (getUserByEmail(email)) {
+    return res.status(409).json({ error: "an account with this email already exists" });
+  }
 
   const userId = randomUUID();
   run(
-    "INSERT INTO users (id, display_name, status) VALUES (?, ?, 'PENDING_LAPTOP')",
-    [userId, displayName]
+    "INSERT INTO users (id, display_name, email, status) VALUES (?, ?, ?, 'PENDING_LAPTOP')",
+    [userId, displayName, email]
   );
-  audit(userId, "account.created", { displayName });
-  res.status(201).json({ userId, status: "PENDING_LAPTOP" });
+  audit(userId, "account.created", { displayName, email });
+  res.status(201).json({ userId, email, status: "PENDING_LAPTOP" });
 });
 
 /** readme.md §6.1 step 2 — one call per authenticator (laptop, then phone, then security key). */
@@ -56,6 +70,11 @@ registerRouter.post("/begin", async (req, res) => {
       residentKey: "required",
       userVerification: "required",
     },
+    // @simplewebauthn/server defaults this to 60s, which is too short for a
+    // cross-device (QR + Bluetooth) phone registration — scanning, pairing,
+    // unlocking, and confirming routinely takes longer on a first attempt.
+    // Match the server-side challenge TTL instead.
+    timeout: CHALLENGE_TTL_SECONDS * 1000,
   });
 
   const expiresAt = new Date(Date.now() + CHALLENGE_TTL_SECONDS * 1000).toISOString();

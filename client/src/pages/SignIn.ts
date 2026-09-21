@@ -1,5 +1,5 @@
 import { startAuthentication } from "@simplewebauthn/browser";
-import { api } from "../api.js";
+import { api, describeAuthenticatorError } from "../api.js";
 import { announcePolite, moveFocusTo, renderAlert } from "../a11y/announce.js";
 import { verifyPrivateAudioRoute, speakCode } from "../audio/routeCheck.js";
 
@@ -45,11 +45,7 @@ signinBtn.addEventListener("click", async () => {
       moveFocusTo(stepupHeading);
     }
   } catch (err: any) {
-    renderAlert(
-      alertRegion,
-      "Sign-in was not completed.",
-      "Make sure this device is registered, then try again, or use account recovery."
-    );
+    renderAlert(alertRegion, "Sign-in was not completed.", describeAuthenticatorError(err));
     console.error(err);
   }
 });
@@ -157,6 +153,7 @@ useKeyInsteadBtn.addEventListener("click", async () => {
       moveFocusTo(document.getElementById("main"));
     }
   } catch (err) {
-    renderAlert(alertRegion, "Security key verification failed.", "Make sure the key is registered and try again.");
+    renderAlert(alertRegion, "Security key verification failed.", describeAuthenticatorError(err));
+    console.error(err);
   }
 });

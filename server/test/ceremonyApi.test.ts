@@ -13,7 +13,7 @@ import {
 
 function makeUser(): string {
   const id = randomUUID();
-  run("INSERT INTO users (id, display_name, status) VALUES (?, ?, 'PENDING_LAPTOP')", [id, "Test User"]);
+  run("INSERT INTO users (id, display_name, email, status) VALUES (?, ?, ?, 'PENDING_LAPTOP')", [id, "Test User", `${id}@example.test`]);
   return id;
 }
 

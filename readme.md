@@ -35,10 +35,10 @@ Run it yourself:
 ```bash
 npm install                    # see the Windows note below before running this
 npm run dev:server             # http://localhost:4000
-npm run dev:client             # http://localhost:5173 — open this in a browser
+npm run dev:client             # http://localhost:5190 — open this in a browser
 ```
 
-Then open `http://localhost:5173/enrol.html` to create an account (you'll
+Then open `http://localhost:5190/enrol.html` to create an account (you'll
 need a device with a fingerprint sensor / Windows Hello / Touch ID, plus a
 second device and a FIDO2 security key to complete all three registrations),
 or `index.html` to sign in.

@@ -24,6 +24,7 @@ authRouter.post("/begin", async (_req, res) => {
   const options = await generateAuthenticationOptions({
     rpID: RP_ID,
     userVerification: "required",
+    timeout: CHALLENGE_TTL_SECONDS * 1000, // see register.ts — same 60s-default issue applies here
   });
   const attemptId = randomUUID();
   anonChallenges.set(attemptId, {

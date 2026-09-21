@@ -1,10 +1,10 @@
 import { startRegistration } from "@simplewebauthn/browser";
-import { api } from "../api.js";
+import { api, describeAuthenticatorError } from "../api.js";
 import { announcePolite, moveFocusTo, renderAlert } from "../a11y/announce.js";
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
-const userIdInput = $<HTMLInputElement>("recovery-user-id");
+const emailInput = $<HTMLInputElement>("recovery-email");
 const codeInput = $<HTMLInputElement>("recovery-code-input");
 const redeemBtn = $<HTMLButtonElement>("redeem-btn");
 const status = $("status");
@@ -13,23 +13,26 @@ const replacementHeading = $("replacement-heading");
 const registerReplacementBtn = $<HTMLButtonElement>("register-replacement-btn");
 const alertRegion = $("alert-region");
 
+// Internal account id, learned from the redeem response — used only to drive
+// the replacement-device registration calls below, never asked of the user.
 let userId: string | null = null;
 
 moveFocusTo(document.getElementById("page-title"));
 
 redeemBtn.addEventListener("click", async () => {
   alertRegion.innerHTML = "";
-  userId = userIdInput.value.trim();
-  if (!userId || !codeInput.value.trim()) {
-    renderAlert(alertRegion, "Enter both your account ID and a recovery code.", "Then select Recover account.");
+  const email = emailInput.value.trim();
+  if (!email || !codeInput.value.trim()) {
+    renderAlert(alertRegion, "Enter both your email and a recovery code.", "Then select Recover account.");
     return;
   }
   try {
-    const result = await api<{ result: string; nextStep?: string }>("/recovery/redeem", {
-      userId,
+    const result = await api<{ result: string; userId: string; nextStep?: string }>("/recovery/redeem", {
+      email,
       code: codeInput.value.trim(),
     });
     if (result.result === "ok") {
+      userId = result.userId;
       status.hidden = false;
       status.textContent = "Recovery code accepted. Your account is temporarily active.";
       announcePolite("Recovery code accepted. Register a replacement device to restore full protection.");
@@ -43,7 +46,7 @@ redeemBtn.addEventListener("click", async () => {
       "That recovery code was not accepted.",
       reason === "already_used"
         ? "This recovery code set has already been used. Contact support for identity-proofed recovery."
-        : "Check the code and your account ID, then try again."
+        : "Check the code and your email, then try again."
     );
   }
 });
@@ -66,7 +69,8 @@ registerReplacementBtn.addEventListener("click", async () => {
       replacementPanel.hidden = true;
       moveFocusTo(document.getElementById("page-title"));
     }
-  } catch {
-    renderAlert(alertRegion, "Replacement device registration failed.", "Try again.");
+  } catch (err) {
+    renderAlert(alertRegion, "Replacement device registration failed.", describeAuthenticatorError(err));
+    console.error(err);
   }
 });
