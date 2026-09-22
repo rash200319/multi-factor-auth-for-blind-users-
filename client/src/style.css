@@ -95,4 +95,24 @@ label {
 
 .step-list { padding-left: 1.25rem; }
 
-nav a { margin-right: 1rem; }
+nav {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.25rem 1rem;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--border);
+}
+
+nav a { margin-right: 0; }
+
+.voice-guidance-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-left: auto;
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+
+.voice-guidance-label input { padding: 0; }

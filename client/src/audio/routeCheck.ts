@@ -42,24 +42,42 @@ export async function verifyPrivateAudioRoute(userDeclaredHeadphones: boolean): 
   return { outputDeviceDetected, userConfirmed: userDeclaredHeadphones, verified };
 }
 
-/**
- * Speaks a code via the Web Speech API. The code is passed directly to the
- * utterance and is NEVER written into DOM text content, NEVER logged, and
- * NEVER placed in a live region (readme.md §2/§8) — it exists only in this
- * function's local scope and the browser's internal TTS pipeline.
- */
-export function speakCode(code: string): Promise<void> {
+function synthesize(text: string, rate: number): Promise<void> {
   return new Promise((resolve, reject) => {
     if (!("speechSynthesis" in window)) {
       reject(new Error("Speech synthesis is not supported in this browser."));
       return;
     }
-    const spoken = code.split("-").join(", "); // pause between words for clarity
-    const utterance = new SpeechSynthesisUtterance(spoken);
-    utterance.rate = 0.9;
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.rate = rate;
     utterance.onend = () => resolve();
     utterance.onerror = (e) => reject(e.error);
     window.speechSynthesis.cancel(); // never overlap with a prior utterance
     window.speechSynthesis.speak(utterance);
   });
+}
+
+/**
+ * Speaks a code via the Web Speech API. The code is passed directly to the
+ * utterance and is NEVER written into DOM text content, NEVER logged, and
+ * NEVER placed in a live region (readme.md §2/§8) — it exists only in this
+ * function's local scope and the browser's internal TTS pipeline. This is
+ * the ONLY function in the app that speaks secret content, and it is only
+ * ever called after verifyPrivateAudioRoute() has passed.
+ */
+export function speakCode(code: string): Promise<void> {
+  const spoken = code.split("-").join(", "); // pause between words for clarity
+  return synthesize(spoken, 0.9);
+}
+
+/**
+ * Speaks arbitrary NON-secret text — instructional prompts, status
+ * announcements, error messages. Used only when the user has opted in to
+ * voice guidance (client/src/a11y/voiceGuidance.ts); never gated by the
+ * private-audio-route check because nothing spoken here is a secret.
+ * Deliberately a separate function from speakCode so the two can never be
+ * confused or merged — one carries a secret, one never does.
+ */
+export function speakText(text: string): Promise<void> {
+  return synthesize(text, 1);
 }

@@ -1,7 +1,10 @@
 import { startRegistration } from "@simplewebauthn/browser";
 import { api, describeAuthenticatorError } from "../api.js";
 import { announcePolite, moveFocusTo, renderAlert } from "../a11y/announce.js";
+import { setupVoiceGuidanceToggle } from "../a11y/voiceGuidance.js";
 import { verifyPrivateAudioRoute, speakCode } from "../audio/routeCheck.js";
+
+setupVoiceGuidanceToggle();
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 

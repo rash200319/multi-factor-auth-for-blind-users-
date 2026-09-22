@@ -9,7 +9,27 @@
  *      announce on whatever output device is currently active, which would
  *      bypass the private-audio-route containment check. Callers must not
  *      pass a code string into announcePolite/announceAssertive.
+ *
+ * These write into aria-live regions, which a real screen reader reads
+ * aloud on its own. When the opt-in "voice guidance" setting is on
+ * (voiceGuidance.ts), the same non-secret text is ALSO spoken directly via
+ * the browser's speech synthesis, for people using the app without a
+ * screen reader running. That opt-in speech is entirely separate from the
+ * step-up code's speakCode() path and is never gated by the private-route
+ * check, because nothing spoken here is a secret.
  */
+
+import { isVoiceGuidanceEnabled } from "./voiceGuidance.js";
+import { speakText } from "../audio/routeCheck.js";
+
+function maybeSpeak(message: string) {
+  if (isVoiceGuidanceEnabled()) {
+    speakText(message).catch(() => {
+      // Speech synthesis failing is never fatal — the aria-live region
+      // (and any real screen reader) still carries the same information.
+    });
+  }
+}
 
 let politeRegion: HTMLElement | null = null;
 let assertiveRegion: HTMLElement | null = null;
@@ -39,6 +59,7 @@ export function announcePolite(message: string) {
   requestAnimationFrame(() => {
     politeRegion!.textContent = message;
   });
+  maybeSpeak(message);
 }
 
 /** For approaching timeouts and similar urgent-but-not-error state. SC 2.2.1/2.2.6. */
@@ -48,6 +69,7 @@ export function announceAssertive(message: string) {
   requestAnimationFrame(() => {
     assertiveRegion!.textContent = message;
   });
+  maybeSpeak(message);
 }
 
 /**
@@ -61,6 +83,7 @@ export function renderAlert(container: HTMLElement, cause: string, remedy: strin
   alert.setAttribute("role", "alert");
   alert.textContent = `${cause} ${remedy}`;
   container.appendChild(alert);
+  maybeSpeak(`${cause} ${remedy}`);
 }
 
 /** Move focus to a landmark/heading and announce nothing extra — the focus move IS the signal. SC 2.4.3. */
