@@ -26,19 +26,13 @@
 
     <div id="stepup-panel" hidden>
       <h2 id="stepup-heading" tabindex="-1">Additional verification required</h2>
-      <p>This action needs a spoken security code. Confirm you are wearing headphones before we speak it — the code is never shown on screen.</p>
-      <div class="field">
-        <label for="headphone-confirm">
-          <input type="checkbox" id="headphone-confirm" />
-          I am wearing headphones or a private headset right now
-        </label>
-      </div>
-      <button id="speak-code-btn" type="button">Speak my security code</button>
+      <p>Enter the three-word security code you memorised last time. Once it is accepted, we speak your next code through your headphones, so put them on before you verify. The code is never shown on screen. If you do not remember your code, or are not wearing headphones, use your security key instead.</p>
       <div class="field" style="margin-top:1rem;">
-        <label for="code-input">Enter the security code you just heard</label>
+        <label for="code-input" id="code-input-label">Your current security code, from memory</label>
         <input type="text" id="code-input" autocomplete="off" placeholder="e.g. harbour-violin-sandbar" />
       </div>
-      <button id="verify-code-btn" type="button">Verify code</button>
+      <button id="verify-code-btn" type="button">I’m wearing headphones — verify code</button>
+      <button id="speak-code-btn" type="button" hidden>I’m wearing headphones — speak a new security code</button>
       <button id="use-key-instead-btn" type="button">Use my security key instead</button>
     </div>
 

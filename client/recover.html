@@ -38,6 +38,43 @@
       <button id="register-replacement-btn" type="button">Register replacement device</button>
     </div>
 
+    <section id="tier4-section">
+      <h2 tabindex="-1" id="tier4-heading">Lost your written recovery codes too?</h2>
+      <p>This is a last resort, with a mandatory waiting period and a notification sent to you immediately — it is not instant, and it is not a password reset.</p>
+      <button id="show-tier4-btn" type="button">Request identity-proofed recovery</button>
+
+      <div id="tier4-form" hidden>
+        <div class="field">
+          <label for="tier4-email">Your email</label>
+          <input type="email" id="tier4-email" autocomplete="email" />
+        </div>
+        <div class="field">
+          <label for="tier4-statement">Describe who you are and roughly when you created this account</label>
+          <textarea id="tier4-statement" rows="4"></textarea>
+        </div>
+        <button id="tier4-submit-btn" type="button">Submit recovery request</button>
+      </div>
+
+      <div id="tier4-status" class="status-box" aria-live="polite" hidden></div>
+
+      <div id="tier4-finish-panel" hidden>
+        <label for="tier4-request-id">Request ID (from the notification you were sent)</label>
+        <input type="text" id="tier4-request-id" readonly />
+        <button id="tier4-finish-btn" type="button">Complete recovery now</button>
+        <p id="tier4-finish-hint"></p>
+      </div>
+    </section>
+
+    <section id="tier4-cancel-section">
+      <h2 tabindex="-1" id="tier4-cancel-heading">Didn't request this?</h2>
+      <p>If you received a recovery-request notification you did not send, cancel it here using the request ID from that message.</p>
+      <div class="field">
+        <label for="tier4-cancel-id">Request ID</label>
+        <input type="text" id="tier4-cancel-id" />
+      </div>
+      <button id="tier4-cancel-btn" type="button">Cancel this request</button>
+    </section>
+
     <div id="alert-region"></div>
   </main>
   <script type="module" src="/src/pages/Recover.ts"></script>

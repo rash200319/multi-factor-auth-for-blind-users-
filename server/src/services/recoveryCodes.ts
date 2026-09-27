@@ -7,9 +7,11 @@ import { rows, run } from "../db/index.js";
 import { audit } from "./audit.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const WORDLIST: string[] = JSON.parse(
-  readFileSync(join(__dirname, "..", "data", "wordlist.json"), "utf8")
-);
+// Excludes the four EFF words that contain a hyphen ("t-shirt", "yo-yo", ...)
+// — hyphen is the code's word separator, so they would make a code ambiguous.
+const WORDLIST: string[] = (
+  JSON.parse(readFileSync(join(__dirname, "..", "data", "wordlist.json"), "utf8")) as string[]
+).filter((w) => !w.includes("-"));
 
 const CODES_PER_SET = 8;
 const WORDS_PER_CODE = 4; // ~51.7 bits per code, PDF §9.2
@@ -39,6 +41,29 @@ export async function issueRecoveryCodeSet(userId: string): Promise<string[]> {
 
   audit(userId, "recovery.codes.issued", { count: plaintextCodes.length });
   return plaintextCodes; // shown to the user exactly once; server keeps no plaintext copy
+}
+
+/**
+ * Non-consuming check used at enrolment: "enrolment does not complete until
+ * the user enters one code back, verifying capture rather than mere
+ * rendering" (PDF §9.2). Matches against the unused set without spending
+ * anything — the set stays fully intact for real recovery later.
+ */
+export async function confirmRecoveryCodeCapture(userId: string, submittedCode: string): Promise<boolean> {
+  const candidates = rows<{ code_hash: string }>(
+    "SELECT code_hash FROM recovery_codes WHERE user_id = ? AND used = 0",
+    [userId]
+  );
+  const normalized = submittedCode.trim().toLowerCase();
+  for (const candidate of candidates) {
+    // eslint-disable-next-line no-await-in-loop
+    if (await verify(candidate.code_hash, normalized)) {
+      audit(userId, "recovery.codes.capture_confirmed");
+      return true;
+    }
+  }
+  audit(userId, "recovery.codes.capture_mismatch");
+  return false;
 }
 
 export type RecoveryVerifyResult = "ok" | "no_match" | "already_used";

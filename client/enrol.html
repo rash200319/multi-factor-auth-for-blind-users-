@@ -47,14 +47,8 @@
 
     <div id="code-confirm-panel" hidden>
       <h2 id="code-confirm-heading" tabindex="-1">Confirm your security code</h2>
-      <p>Confirm you are wearing headphones, then we will speak your first security code. Repeat it back to prove you captured it correctly. Write it down somewhere private if you want a backup — it will not be shown on screen.</p>
-      <div class="field">
-        <label for="headphone-confirm-enrol">
-          <input type="checkbox" id="headphone-confirm-enrol" />
-          I am wearing headphones or a private headset right now
-        </label>
-      </div>
-      <button id="speak-first-code-btn" type="button">Speak my security code</button>
+      <p>Put on headphones, then we will speak your first security code. Repeat it back to prove you captured it correctly. Write it down somewhere private if you want a backup — it will not be shown on screen.</p>
+      <button id="speak-first-code-btn" type="button">I’m wearing headphones — speak my security code</button>
       <div class="field" style="margin-top:1rem;">
         <label for="repeat-code-input">Type the code back</label>
         <input type="text" id="repeat-code-input" autocomplete="off" />
@@ -64,9 +58,16 @@
 
     <div id="recovery-codes-panel" hidden>
       <h2 tabindex="-1" id="recovery-codes-heading">Your written recovery codes</h2>
-      <p>These eight codes are shown once. Save them somewhere private (password manager, refreshable braille display, or printed and stored securely). Each code works once; using any one invalidates the rest.</p>
+      <p>These eight codes are given to you once. Save them somewhere private (password manager, refreshable braille display, or printed and stored securely). If you are wearing headphones, we can also read them aloud. Each code works once; using any one invalidates the rest.</p>
       <ul id="recovery-codes-list"></ul>
-      <button id="recovery-codes-done-btn" type="button">I have saved my recovery codes</button>
+      <button id="recovery-codes-speak-btn" type="button">I’m wearing headphones — read my recovery codes aloud</button>
+      <button id="recovery-codes-download-btn" type="button">Download codes as a text file</button>
+      <button id="recovery-codes-copy-btn" type="button">Copy codes to clipboard</button>
+      <div class="field" style="margin-top:1rem;">
+        <label for="recovery-confirm-input">To finish enrolment, type any one of your recovery codes from where you saved it</label>
+        <input type="text" id="recovery-confirm-input" autocomplete="off" />
+      </div>
+      <button id="recovery-codes-done-btn" type="button">Confirm and finish enrolment</button>
     </div>
 
     <div id="alert-region"></div>

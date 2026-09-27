@@ -15,3 +15,11 @@ export const CHALLENGE_TTL_SECONDS = 300; // WCAG 2.2 SC 2.2.1 — 300s minimum,
  * is always identifiable, never indistinguishable from a real one.
  */
 export const DEV_ALLOW_SKIP_SECURITY_KEY = process.env.DEV_ALLOW_SKIP_SECURITY_KEY === "true";
+
+/**
+ * Mandatory delay, in hours, before a recovery-tier-4 request (readme.md
+ * §6.5 rank 4) can complete — the delay is the security control, giving the
+ * real account owner a window to see the notification and cancel it if it
+ * wasn't them. docs/hardening-plan.md WI-3.
+ */
+export const RECOVERY_TIER4_DELAY_HOURS = Number(process.env.RECOVERY_TIER4_DELAY_HOURS ?? 72);

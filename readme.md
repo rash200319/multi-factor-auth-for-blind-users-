@@ -1,7 +1,8 @@
 # Multi-Factor Authentication System for Visually Impaired Users
 
 CS3053 — Information Security. Implementation guide derived from the group's
-`GROUP_Unified_Design.pdf` (Unified Design Document, Submission 2). This README
+`computer_security.pdf` (Unified Design Document, Submission 2 — kept one
+level above this repo). This README
 turns that design into a concrete build plan: architecture, data model, API
 contracts, ceremonies, interaction rules, and a milestone-based implementation
 order.
@@ -24,11 +25,19 @@ concretely:
 | Routine login (Factors 1+2, discoverable credential) | Implemented — `server/src/routes/auth.ts` |
 | Risk engine + step-up ceremony (spoken code) | Implemented — `server/src/services/riskEngine.ts`, `server/src/routes/stepup.ts` |
 | Security-key alternative to the spoken code (SC 3.3.8) | Implemented — `POST /stepup/key/begin` / `/key/finish` |
-| Recovery hierarchy (device → key → written codes) | Implemented — `server/src/routes/recovery.ts` |
-| Audit log + 5-failure lockout | Implemented — `server/src/services/audit.ts`, `ceremonyApi.ts` |
+| Recovery hierarchy (device → key → written codes → out-of-band tier 4) | Implemented — `server/src/routes/recovery.ts`, `server/src/services/recoveryTier4.ts` |
+| Audit log + 5-failure lockout + lockout notification | Implemented — `server/src/services/audit.ts`, `ceremonyApi.ts`, `notify.ts` |
+| Session-based authorization on sensitive endpoints (step-up, recovery-code issuance) | Implemented — `server/src/middleware/auth.ts`, see `docs/hardening-plan.md` WI-1 |
+| Step-up rate limiting | Implemented — `server/src/middleware/rateLimit.ts` |
 | Accessible interaction layer (focus, `aria-live`, alerts, timer) | Implemented — `client/src/a11y/`, `client/src/pages/` |
-| Automated unit tests (18/18 passing) | `server/test/*.test.ts` — see `docs/verification-plan.md` |
+| Automated unit tests (45/45 passing) | `server/test/*.test.ts` — see `docs/verification-plan.md` |
+| Deployment TLS guidance | `docs/deployment.md` — dev/testing HTTPS already covered by `tools/tunnel.mjs` |
 | WCAG manual audit, real screen-reader test matrix, acoustic containment measurement | **Not yet run — needs a human.** See `docs/verification-plan.md` §"What still requires a human". |
+
+See `docs/hardening-plan.md` for the five gaps this round of work closed
+(session-trust-the-body-userId, missing recovery tier 4, missing lockout
+notification, missing rate limiting, missing deployment TLS docs) and the
+design decisions behind each fix.
 
 Run it yourself:
 
@@ -137,7 +146,7 @@ the actual choices made for this build, in `server/` and `client/`:
 | Session/token encryption | `jose` (`EncryptJWT`/`jwtDecrypt`, A256GCM) | `Enc_key(...)` in the ceremony pseudocode = the encrypted session cookie in `server/src/services/session.ts` |
 | Frontend | Vite + vanilla TypeScript, 3 HTML entry points (`index.html`, `enrol.html`, `recover.html`) | No framework runtime between the DOM and the accessibility rules in §8 |
 | Speech delivery (step-up code) | Browser `SpeechSynthesisUtterance` via `client/src/audio/routeCheck.ts` | Code is *spoken* client-side after the route check passes, never typed by the server into a visible field |
-| Audio-route check | `navigator.mediaDevices.enumerateDevices()` **plus** an explicit confirmation checkbox — the API alone is trusted for nothing | PDF flags automated detection as weak (§13.2) — see `RouteCheckResult` in `routeCheck.ts` |
+| Audio-route check | `navigator.mediaDevices.enumerateDevices()` **plus** an explicit declaration (each speaking button is labelled "I'm wearing headphones — …") — the API alone is trusted for nothing | PDF flags automated detection as weak (§13.2) — see `RouteCheckResult` in `routeCheck.ts` |
 | Word list | Real EFF large wordlist (7,776 words), fetched from eff.org and committed as `server/src/data/wordlist.json` | Matches PDF §7.2 exactly, not a placeholder subset |
 | TLS | Expected from a reverse proxy in production; dev server runs plain HTTP on `localhost` | `server/src/index.ts` logs a reminder on boot |
 
@@ -152,7 +161,6 @@ are the part that must not change.
 
 ```
 multi-factor-auth-for-blind-users-/
-├── GROUP_Unified_Design.pdf        # source design doc (already present at repo root's parent)
 ├── readme.md                       # this file
 ├── package.json                    # npm workspaces root (server + client)
 ├── server/
@@ -164,7 +172,7 @@ multi-factor-auth-for-blind-users-/
 │   │   │   ├── register.ts         # /register/start-account, /begin, /finish
 │   │   │   ├── auth.ts             # /auth/begin, /auth/finish
 │   │   │   ├── stepup.ts           # /stepup/challenge, /verify, /confirm-capture, /key/begin, /key/finish
-│   │   │   ├── recovery.ts         # /recovery/codes/issue, /recovery/redeem
+│   │   │   ├── recovery.ts         # /recovery/codes/issue, /codes/confirm, /redeem, /tier4/*
 │   │   │   └── session.ts          # /me, /logout
 │   │   ├── services/
 │   │   │   ├── ceremonyApi.ts      # account lifecycle state machine (Figure 6/10)
@@ -175,7 +183,7 @@ multi-factor-auth-for-blind-users-/
 │   │   │   └── audit.ts            # append-only audit log writes
 │   │   ├── data/wordlist.json      # real EFF large wordlist, 7,776 words
 │   │   └── db/                     # schema.sql + node:sqlite wrapper
-│   └── test/                       # 18 unit tests, node:test
+│   └── test/                       # 45 unit tests, node:test
 ├── client/
 │   ├── index.html                  # sign-in
 │   ├── enrol.html                  # enrolment (3 devices + first code)
@@ -279,8 +287,8 @@ A full database breach yields no usable authentication material (PDF AS-8).
 6.  server -> client  : { registration_complete }
 ```
 
-Repeat for phone, then security key. **After the phone registration**, issue
-the first step-up code (`C_1`) over the verified private audio route and
+Repeat for phone, then security key. **After the security key registration**
+(PDF §6.1 steps 7-8), issue the first step-up code (`C_1`) over the verified private audio route and
 require the user to repeat it back before the account leaves `PENDING`.
 
 ### 6.2 Authentication (routine login — Factors 1+2, no username typed)
@@ -302,17 +310,26 @@ require the user to repeat it back before the account leaves `PENDING`.
 ### 6.3 Step-up (Factor 3 — spoken code)
 
 ```
-1.  client  : verify private audio route (headphone check + explicit user confirmation)
-              -- if NOT verified: REFUSE spoken channel, offer security key instead. Stop here.
-2.  server  : speak C_n over the verified route only (never render, never place in a live region)
-3.  user    : enters C_n from memory
-4.  client -> server : Enc_key(C_n)
-5.  server  : verify Argon2id(C_n | salt) == stored hash
+1.  client  : verify private audio route (explicit user declaration: the button is labelled
+              "I'm wearing headphones — verify code", so one keypress confirms and submits)
+              -- if NOT verified: REFUSE, complete step-up with the security key instead.
+              -- (the server also refuses /stepup/verify without it, before C_n is spent)
+2.  user    : enters C_n FROM MEMORY -- the server never speaks C_n at step-up time;
+              it was delivered at the end of the previous step-up (or at enrolment as C_1)
+3.  client -> server : POST /stepup/verify Enc_key(C_n)
+4.  server  : verify Argon2id(C_n | salt) == stored hash
               -> invalidate C_n permanently (mark consumed, bump generation)
-              -> generate C_(n+1); speak it over the private route
-              -> require user to repeat C_(n+1) back (confirms capture, not just delivery)
+              -> issue elevated session; send out-of-band notification (PDF §7.4)
+              -> generate C_(n+1); client speaks it over the private route
+5.  user    : repeats C_(n+1) back -> POST /stepup/confirm-capture (elevated session)
+              -- if missed: POST /stepup/challenge (elevated session only) speaks a fresh one
 6.  server -> client : { elevated_session }
 ```
+
+At any step-up prompt the user may present the security key instead
+(`/stepup/key/begin`, `/key/finish`) — the WCAG SC 3.3.8 alternative (PDF
+§7.3). A user who has forgotten their code uses the key, then asks for a new
+code from the elevated session.
 
 Lockout: 5 consecutive step-up failures -> `LOCKED`, out-of-band notification
 sent, no support-agent override permitted (T8 mitigation — see §2).
@@ -335,10 +352,18 @@ determines when Factor 3 fires. Minimum rule set for the course build:
 
 1. The other everyday device (laptop or phone), if still held.
 2. Roaming security key + fingerprint/PIN — primary recovery mechanism.
-3. Written recovery codes (8 words from the same wordlist, Argon2id-hashed,
-   per-code salt) — last resort.
-4. Out-of-band identity proofing with mandatory delay + notification to all
-   registered contacts — only if the security key is also lost.
+3. Written recovery codes (8 codes per set, each 4 words from the same
+   wordlist, ~51.7 bits, Argon2id-hashed, per-code salt) — last resort.
+   Enrolment only completes once the user types one code back
+   (`POST /recovery/codes/confirm`, PDF §9.2).
+   The codes can be downloaded, copied, read by a braille display, or read
+   aloud; reading aloud uses the same headphone check as the step-up code.
+4. Out-of-band identity proofing with mandatory delay + notification —
+   only if the security key is also lost. **Implemented** —
+   `server/src/services/recoveryTier4.ts`, `POST /recovery/tier4/{request,cancel,finish}`.
+   Course-scope simplification: a self-reported identity statement, not real
+   KYC — the security property is the mandatory delay + notification, not
+   the statement text. See `docs/hardening-plan.md` WI-3 and §12 below.
 
 **Never implement:** knowledge-based questions, SMS reset, email reset, or a
 support-agent override. Each is an unauthenticated path to a fully
@@ -393,17 +418,18 @@ Two rules to bake into every component from the start, not bolt on later:
 
 ## 9. Security controls checklist (map to PDF §10 before calling a milestone done)
 
-- [ ] `clientData.origin` signed and checked on every ceremony (phishing resistance, T1)
-- [ ] `rp_id_hash` bound on every assertion (relay/AiTM resistance)
-- [ ] TLS 1.3 enforced, no downgrade path (T5)
-- [ ] No SMS/email anywhere in the codebase (T6)
-- [ ] No password field anywhere; step-up code is rate-limited (T7)
-- [ ] No human-override path in support tooling (T8)
-- [ ] Nonces are CSPRNG, single-use, 300s TTL, checked on every finish call (assertion replay)
-- [ ] Step-up code hash invalidated **before** the next code is generated (replay of consumed code)
-- [ ] `sign_count` strictly increasing check implemented and logged, even though it's a weak signal on some authenticators (cloning detection, PDF §13.7 caveat)
-- [ ] Credential store contains public keys only — grep the schema for any private-key or plaintext-secret column before every release
-- [ ] Step-up code never logged, never placed in a response body outside the encrypted session exchange
+- [x] `clientData.origin` signed and checked on every ceremony (phishing resistance, T1)
+- [x] `rp_id_hash` bound on every assertion (relay/AiTM resistance)
+- [ ] TLS 1.3 enforced, no downgrade path (T5) — dev server is plain HTTP by design; see `docs/deployment.md` for the reverse-proxy requirement in a real deployment
+- [x] No SMS/email anywhere in the codebase (T6) — `notify.ts` sends informational alerts only, never a code the user types back; see its module docstring for why that's not the same thing
+- [x] No password field anywhere; step-up code is rate-limited (T7) — `server/src/middleware/rateLimit.ts`
+- [x] No human-override path in support tooling (T8) — including recovery tier 4, which is fully automated (delay + notification), never a support-agent judgment call
+- [x] Nonces are CSPRNG, single-use, 300s TTL, checked on every finish call (assertion replay)
+- [x] Step-up code hash invalidated **before** the next code is generated (replay of consumed code)
+- [x] `sign_count` strictly increasing check implemented and logged, even though it's a weak signal on some authenticators (cloning detection, PDF §13.7 caveat)
+- [x] Credential store contains public keys only — grep the schema for any private-key or plaintext-secret column before every release
+- [x] Step-up code never logged, never placed in a response body outside the encrypted session exchange
+- [x] Sensitive endpoints (`/stepup/*`, `/recovery/codes/issue`) derive `userId` from a server-issued cookie, never a client-supplied value — `server/src/middleware/auth.ts`, `docs/hardening-plan.md` WI-1
 
 ---
 
@@ -467,6 +493,12 @@ implementation silently claim more than the design does:
   (audit log) so this is measurable, not assumed.
 - No formal protocol verification and no attestation enforcement — a full
   AAL3 claim is intentionally not made.
+- Recovery tier 4 (§6.5 rank 4) is a self-reported identity statement, not
+  verified KYC — consistent with the point above, no stronger claim is made.
+  The security property it actually provides is the mandatory delay +
+  notification, which gives the real account owner a chance to object; the
+  statement text itself is not verified against anything. See
+  `docs/hardening-plan.md` WI-3.
 
 ---
 

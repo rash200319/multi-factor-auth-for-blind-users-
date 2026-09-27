@@ -9,20 +9,36 @@ import { row, run } from "../db/index.js";
 import { RP_ID, ORIGIN, CHALLENGE_TTL_SECONDS } from "../config.js";
 import { getUser, confirmFirstStepUpCode, recordStepUpFailure, resetStepUpFailures } from "../services/ceremonyApi.js";
 import { issueStepUpCode, verifyAndConsumeStepUpCode, confirmStepUpCodeCapture } from "../services/stepupCode.js";
-import { issueSession, sessionCookieName, sessionCookieOptions } from "../services/session.js";
+import {
+  issueSession,
+  sessionCookieName,
+  sessionCookieOptions,
+  stepupTicketCookieName,
+  stepupTicketCookieOptions,
+} from "../services/session.js";
 import { audit } from "../services/audit.js";
+import { requireStepUpTicket, resolveCodeIssuanceUser } from "../middleware/auth.js";
+import { notifyUser } from "../services/notify.js";
+import { stepupChallengeLimiter, stepupVerifyLimiter } from "../middleware/rateLimit.js";
 
 export const stepupRouter = Router();
 
 /**
- * readme.md §6.3 step 1-2 / §2: the client MUST verify the private audio
- * route (headphones) and pass that confirmation explicitly. If it is not
- * confirmed, the server REFUSES to speak the code — it never falls back to
- * an unverified output device. This is the one place a plaintext step-up
- * code legitimately crosses the wire, and only after this gate passes.
+ * Speaks a code only after the client has verified the private audio route
+ * (PDF §7.1 containment: refusal over degradation). If the route is not
+ * confirmed, the server REFUSES — it never falls back to an unverified
+ * output device, and the client offers the security key instead.
+ *
+ * This endpoint never serves the code the user must present at step-up:
+ * that code (C_n) is entered from memory (PDF §6.2 step 7b.ii). It only
+ * issues a code in two situations — see resolveCodeIssuanceUser:
+ *  1. Bootstrap: C_1 during enrolment (status PENDING_CODE_CONFIRM).
+ *  2. Re-delivery of C_(n+1) inside an elevated session, e.g. the user
+ *     did not catch the code spoken by /verify and asks to hear a new one,
+ *     or authenticated with the security key and wants a fresh code.
  */
-stepupRouter.post("/challenge", async (req, res) => {
-  const userId = String(req.body?.userId ?? "");
+stepupRouter.post("/challenge", resolveCodeIssuanceUser, stepupChallengeLimiter, async (req, res) => {
+  const userId = req.userId!;
   const privateRouteConfirmed = Boolean(req.body?.privateRouteConfirmed);
   const user = getUser(userId);
   if (!user) return res.status(404).json({ error: "unknown user" });
@@ -44,9 +60,14 @@ stepupRouter.post("/challenge", async (req, res) => {
   res.json({ code, generation });
 });
 
-/** readme.md §6.1 step 8 / §6.3 step 5 — "repeat it back" capture confirmation. */
-stepupRouter.post("/confirm-capture", async (req, res) => {
-  const userId = String(req.body?.userId ?? "");
+/**
+ * "Repeat it back" capture confirmation — PDF §6.1 step 8 (C_1) and §6.2
+ * step 7b.iv (C_(n+1)). Non-consuming. Same two trust models as
+ * /challenge: bootstrap during enrolment, otherwise an elevated session
+ * (the step-up ticket has already been exchanged for one by /verify).
+ */
+stepupRouter.post("/confirm-capture", resolveCodeIssuanceUser, stepupVerifyLimiter, async (req, res) => {
+  const userId = req.userId!;
   const repeatedCode = String(req.body?.repeatedCode ?? "");
   const user = getUser(userId);
   if (!user) return res.status(404).json({ error: "unknown user" });
@@ -58,44 +79,83 @@ stepupRouter.post("/confirm-capture", async (req, res) => {
 
   if (user.status === "PENDING_CODE_CONFIRM") {
     confirmFirstStepUpCode(userId); // -> ACTIVE
+    // The account just went ACTIVE with no login session yet (bootstrap has
+    // none to reuse) — issue one now so the rest of enrolment (e.g.
+    // /recovery/codes/issue, which requires a session — WI-1) can proceed
+    // without a separate sign-in. Mirrors /recovery/redeem's existing
+    // immediate-session-on-success pattern.
+    const token = await issueSession(userId, "aal2");
+    res.cookie(sessionCookieName, token, sessionCookieOptions);
   }
   const updated = getUser(userId)!;
   res.json({ captured: true, accountStatus: updated.status });
 });
 
 /**
- * readme.md §6.3 steps 3-6 — used to authorize a high-risk operation flagged
- * by /auth/finish. Verifies + permanently invalidates C_n, then issues and
- * speaks C_(n+1) so the account always has a fresh code ready for next time.
+ * PDF §6.2 step 7b — authorizes a high-risk operation flagged by
+ * /auth/finish:
+ *   i.   private audio route verified, else REFUSE (use the security key)
+ *   ii.  user enters C_n from memory
+ *   iii. verify Argon2id hash; invalidate C_n permanently
+ *   iv.  generate C_(n+1), speak it, user repeats it back (/confirm-capture)
+ *   v.   elevated session
+ *
+ * Step i is checked BEFORE C_n is touched: C_(n+1) must be spoken in the
+ * same interaction, so without a private route the ceremony cannot finish
+ * and C_n must not be spent.
+ *
+ * userId comes from the pending-step-up ticket, never the request body —
+ * docs/hardening-plan.md WI-1.
  */
-stepupRouter.post("/verify", async (req, res) => {
-  const userId = String(req.body?.userId ?? "");
+stepupRouter.post("/verify", requireStepUpTicket, stepupVerifyLimiter, async (req, res) => {
+  const userId = req.userId!;
   const submittedCode = String(req.body?.code ?? "");
   const privateRouteConfirmed = Boolean(req.body?.privateRouteConfirmed);
   const user = getUser(userId);
   if (!user) return res.status(404).json({ error: "unknown user" });
 
+  if (!privateRouteConfirmed) {
+    audit(userId, "stepup.verify.refused_no_route");
+    return res.status(409).json({
+      refused: true,
+      reason: "private_audio_route_not_verified",
+      alternative: "security_key",
+    });
+  }
+
   const result = await verifyAndConsumeStepUpCode(userId, submittedCode);
 
   if (result !== "ok") {
-    const lockedNow = recordStepUpFailure(userId);
+    const lockedNow = await recordStepUpFailure(userId);
     return res.status(400).json({ result, locked: lockedNow });
   }
 
   resetStepUpFailures(userId);
   const token = await issueSession(userId, "aal2-elevated");
   res.cookie(sessionCookieName, token, sessionCookieOptions);
+  // The ticket is consumed — it's about to be superseded by a real session
+  // and must not remain usable on its own.
+  res.clearCookie(stepupTicketCookieName, stepupTicketCookieOptions);
+  await notifyStepUp(user.id, user.email, "spoken_code");
 
   // Rotate immediately, while the user is still wearing the verified
-  // headset (readme.md §7.1). Only speak the next code if the private
-  // route is still confirmed for this same interaction.
-  if (privateRouteConfirmed) {
-    const next = await issueStepUpCode(userId);
-    return res.json({ result: "ok", elevated: true, nextCode: next.code, nextGeneration: next.generation });
-  }
-
-  res.json({ result: "ok", elevated: true, nextCode: null });
+  // headset (PDF §7.1).
+  const next = await issueStepUpCode(userId);
+  res.json({ result: "ok", elevated: true, nextCode: next.code, nextGeneration: next.generation });
 });
+
+/**
+ * PDF §7.4 — out-of-band notification on every step-up, so an adversary
+ * who consumes a captured code produces a signal the user receives. A
+ * delivery failure is audited but does not undo an already-verified step-up.
+ */
+async function notifyStepUp(userId: string, email: string, method: "spoken_code" | "security_key") {
+  try {
+    await notifyUser(email, "stepup_completed", { method });
+  } catch (err) {
+    audit(userId, "notify.failed", { kind: "stepup_completed", message: (err as Error).message });
+  }
+}
 
 /**
  * WCAG 2.2 SC 3.3.8 "Alternative" provision: the registered roaming
@@ -105,8 +165,8 @@ stepupRouter.post("/verify", async (req, res) => {
  */
 const keyChallenges = new Map<string, { userId: string; challenge: string; expiresAt: number }>();
 
-stepupRouter.post("/key/begin", async (req, res) => {
-  const userId = String(req.body?.userId ?? "");
+stepupRouter.post("/key/begin", requireStepUpTicket, async (req, res) => {
+  const userId = req.userId!;
   const user = getUser(userId);
   if (!user) return res.status(404).json({ error: "unknown user" });
 
@@ -132,11 +192,12 @@ stepupRouter.post("/key/begin", async (req, res) => {
   res.json({ attemptId, options });
 });
 
-stepupRouter.post("/key/finish", async (req, res) => {
+stepupRouter.post("/key/finish", requireStepUpTicket, async (req, res) => {
   const attemptId = String(req.body?.attemptId ?? "");
   const response = req.body?.response as AuthenticationResponseJSON | undefined;
   const pending = keyChallenges.get(attemptId);
   if (!pending || !response) return res.status(400).json({ error: "no pending attempt" });
+  if (pending.userId !== req.userId) return res.status(403).json({ error: "attempt does not belong to this ticket" });
   keyChallenges.delete(attemptId);
   if (pending.expiresAt < Date.now()) return res.status(400).json({ error: "challenge expired" });
 
@@ -170,11 +231,20 @@ stepupRouter.post("/key/finish", async (req, res) => {
     return res.status(400).json({ error: "security key not verified" });
   }
 
-  run("UPDATE credentials SET sign_count = ? WHERE id = ?", [verification.authenticationInfo.newCounter, cred.id]);
+  // Same clone detection as /auth/finish (PDF §10: signCount monotonicity).
+  const { newCounter } = verification.authenticationInfo;
+  if (newCounter !== 0 && newCounter <= cred.sign_count) {
+    audit(pending.userId, "stepup.key.signcount_anomaly", { stored: cred.sign_count, seen: newCounter });
+    return res.status(400).json({ error: "authenticator counter anomaly — possible cloned credential" });
+  }
+  run("UPDATE credentials SET sign_count = ? WHERE id = ?", [newCounter, cred.id]);
   resetStepUpFailures(pending.userId);
   audit(pending.userId, "stepup.key.ok");
 
   const token = await issueSession(pending.userId, "aal2-elevated");
   res.cookie(sessionCookieName, token, sessionCookieOptions);
+  res.clearCookie(stepupTicketCookieName, stepupTicketCookieOptions);
+  const user = getUser(pending.userId);
+  if (user) await notifyStepUp(user.id, user.email, "security_key");
   res.json({ result: "ok", elevated: true });
 });

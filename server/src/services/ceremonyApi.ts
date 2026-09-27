@@ -1,5 +1,6 @@
 import { row, run } from "../db/index.js";
 import { audit } from "./audit.js";
+import { notifyUser } from "./notify.js";
 
 /**
  * Account lifecycle state machine — readme.md §5 (users.status) and §7
@@ -96,7 +97,7 @@ export function confirmFirstStepUpCode(userId: string) {
 const MAX_STEPUP_FAILURES = 5;
 
 /** Returns true if the user is now locked as a result of this failure. */
-export function recordStepUpFailure(userId: string): boolean {
+export async function recordStepUpFailure(userId: string): Promise<boolean> {
   const user = getUser(userId);
   if (!user) return false;
   const attempts = user.failed_stepup_attempts + 1;
@@ -106,6 +107,8 @@ export function recordStepUpFailure(userId: string): boolean {
       [attempts, userId]
     );
     audit(userId, "lifecycle.locked", { attempts });
+    const updated = getUser(userId)!;
+    await notifyUser(updated.email, "lockout", { lockedUntil: updated.locked_until });
     return true;
   }
   run("UPDATE users SET failed_stepup_attempts = ? WHERE id = ?", [attempts, userId]);

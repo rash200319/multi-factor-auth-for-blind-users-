@@ -1,4 +1,5 @@
 import { EncryptJWT, jwtDecrypt } from "jose";
+import { CHALLENGE_TTL_SECONDS } from "../config.js";
 
 /**
  * Session tokens are encrypted (JWE), never a bare signed JWT — this is the
@@ -19,7 +20,12 @@ if (key.length !== 32) {
   throw new Error("SESSION_SECRET must decode to exactly 32 bytes.");
 }
 
-export type Aal = "aal2" | "aal2-elevated";
+// "pending_stepup" is deliberately not a login session: it proves only
+// "this browser just passed factors 1+2 for this user, very recently" and
+// bridges /auth/finish (risk=high) to /stepup/*. /me must never accept it
+// as proof of being logged in — see requireStepUpTicket vs requireSession
+// in server/src/middleware/auth.ts (docs/hardening-plan.md WI-1).
+export type Aal = "aal2" | "aal2-elevated" | "pending_stepup";
 
 export interface SessionClaims {
   sub: string; // user_id
@@ -30,12 +36,26 @@ const SESSION_COOKIE = "mfa_session";
 const SESSION_TTL_SECONDS = 15 * 60; // routine session
 const ELEVATED_TTL_SECONDS = 5 * 60; // step-up elevation is short-lived
 
-export async function issueSession(userId: string, aal: Aal): Promise<string> {
+export async function issueSession(userId: string, aal: "aal2" | "aal2-elevated"): Promise<string> {
   const ttl = aal === "aal2-elevated" ? ELEVATED_TTL_SECONDS : SESSION_TTL_SECONDS;
   return new EncryptJWT({ sub: userId, aal })
     .setProtectedHeader({ alg: "dir", enc: "A256GCM" })
     .setIssuedAt()
     .setExpirationTime(Math.floor(Date.now() / 1000) + ttl)
+    .encrypt(key);
+}
+
+/**
+ * Bridges /auth/finish (risk=high, no login session issued yet) to
+ * /stepup/* — proves factors 1+2 already passed, without granting a login
+ * session. TTL capped at the WebAuthn/step-up challenge window so it can't
+ * outlive the ceremony it exists to bridge.
+ */
+export async function issueStepUpTicket(userId: string): Promise<string> {
+  return new EncryptJWT({ sub: userId, aal: "pending_stepup" })
+    .setProtectedHeader({ alg: "dir", enc: "A256GCM" })
+    .setIssuedAt()
+    .setExpirationTime(Math.floor(Date.now() / 1000) + CHALLENGE_TTL_SECONDS)
     .encrypt(key);
 }
 
@@ -67,3 +87,8 @@ export const sessionCookieOptions = {
   secure,
   path: "/",
 };
+
+export const stepupTicketCookieName = "mfa_stepup_ticket";
+// Same cookie attributes as the login session — only the name and the
+// claims inside differ.
+export const stepupTicketCookieOptions = sessionCookieOptions;

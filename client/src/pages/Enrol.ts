@@ -2,7 +2,7 @@ import { startRegistration } from "@simplewebauthn/browser";
 import { api, describeAuthenticatorError } from "../api.js";
 import { announcePolite, moveFocusTo, renderAlert } from "../a11y/announce.js";
 import { setupVoiceGuidanceToggle } from "../a11y/voiceGuidance.js";
-import { verifyPrivateAudioRoute, speakCode } from "../audio/routeCheck.js";
+import { verifyPrivateAudioRoute, speakCode, speakText } from "../audio/routeCheck.js";
 
 setupVoiceGuidanceToggle();
 
@@ -18,15 +18,23 @@ const registerDeviceBtn = $<HTMLButtonElement>("register-device-btn");
 const skipSecurityKeyBtn = $<HTMLButtonElement>("skip-security-key-btn");
 const codeConfirmPanel = $("code-confirm-panel");
 const codeConfirmHeading = $("code-confirm-heading");
-const headphoneConfirmEnrol = $<HTMLInputElement>("headphone-confirm-enrol");
 const speakFirstCodeBtn = $<HTMLButtonElement>("speak-first-code-btn");
 const repeatCodeInput = $<HTMLInputElement>("repeat-code-input");
 const confirmCaptureBtn = $<HTMLButtonElement>("confirm-capture-btn");
 const recoveryPanel = $("recovery-codes-panel");
 const recoveryHeading = $("recovery-codes-heading");
 const recoveryList = $<HTMLUListElement>("recovery-codes-list");
+const recoverySpeakBtn = $<HTMLButtonElement>("recovery-codes-speak-btn");
+const recoveryDownloadBtn = $<HTMLButtonElement>("recovery-codes-download-btn");
+const recoveryCopyBtn = $<HTMLButtonElement>("recovery-codes-copy-btn");
+const recoveryConfirmInput = $<HTMLInputElement>("recovery-confirm-input");
 const recoveryDoneBtn = $<HTMLButtonElement>("recovery-codes-done-btn");
 const alertRegion = $("alert-region");
+
+// The private-route declaration (PDF §13.2: a self-declared control) is the
+// button press itself — each speaking button's label begins "I'm wearing
+// headphones", so there is no separate checkbox to find and tick first.
+const DECLARED_BY_BUTTON = true;
 
 const DEVICE_STEP_LABELS: Record<string, string> = {
   laptop: "Laptop passkey",
@@ -169,15 +177,7 @@ skipSecurityKeyBtn.addEventListener("click", async () => {
 speakFirstCodeBtn.addEventListener("click", async () => {
   if (!userId) return;
   alertRegion.innerHTML = "";
-  const route = await verifyPrivateAudioRoute(headphoneConfirmEnrol.checked);
-  if (!route.verified) {
-    renderAlert(
-      alertRegion,
-      "We cannot speak your first security code without confirming a private audio route.",
-      "Check the headphones box above and try again."
-    );
-    return;
-  }
+  await verifyPrivateAudioRoute(DECLARED_BY_BUTTON);
   try {
     const { code } = await api<{ code: string }>("/stepup/challenge", { userId, privateRouteConfirmed: true });
     announcePolite("Speaking your first security code now.");
@@ -198,7 +198,7 @@ confirmCaptureBtn.addEventListener("click", async () => {
       repeatedCode: repeatCodeInput.value,
     });
     if (!result.captured) {
-      renderAlert(alertRegion, "That did not match the code we spoke.", "Select “Speak my security code” to hear it again.");
+      renderAlert(alertRegion, "That did not match the code we spoke.", "Select “I’m wearing headphones — speak my security code” to hear it again.");
       return;
     }
     setProgress("code" as any, "confirmed");
@@ -207,7 +207,7 @@ confirmCaptureBtn.addEventListener("click", async () => {
     announcePolite("Security code confirmed. Your account is now active. Issuing your written recovery codes.");
     codeConfirmPanel.hidden = true;
 
-    const recovery = await api<{ codes: string[] }>("/recovery/codes/issue", { userId });
+    const recovery = await api<{ codes: string[] }>("/recovery/codes/issue");
     recoveryList.innerHTML = "";
     for (const code of recovery.codes) {
       const li = document.createElement("li");
@@ -216,14 +216,86 @@ confirmCaptureBtn.addEventListener("click", async () => {
     }
     recoveryPanel.hidden = false;
     moveFocusTo(recoveryHeading);
-  } catch {
-    renderAlert(alertRegion, "Could not confirm the code.", "Try again.");
+  } catch (err: any) {
+    if (err?.status === 400) {
+      renderAlert(alertRegion, "That did not match the code we spoke.", "Select “I’m wearing headphones — speak my security code” to hear it again.");
+    } else {
+      renderAlert(alertRegion, "Could not confirm the code.", "Try again.");
+    }
   }
 });
 
-recoveryDoneBtn.addEventListener("click", () => {
+// PDF §9.2 delivery channels: download to file, copy to a password manager.
+// A refreshable braille display reads the list above via the screen reader.
+function recoveryCodesText(): string {
+  return Array.from(recoveryList.querySelectorAll("li"), (li) => li.textContent ?? "").join("\n");
+}
+
+// Audio channel for the recovery codes. They are secrets, so the same
+// containment rule as the step-up code applies (PDF §7.1, gate C3): spoken
+// only via speakCode() after the private route is declared, never through
+// a live region or voice guidance. Without headphones, download or copy.
+let readingRecoveryCodes = false;
+
+recoverySpeakBtn.addEventListener("click", async () => {
+  if (readingRecoveryCodes) return;
+  alertRegion.innerHTML = "";
+  await verifyPrivateAudioRoute(DECLARED_BY_BUTTON);
+
+  const codes = Array.from(recoveryList.querySelectorAll("li"), (li) => li.textContent ?? "");
+  readingRecoveryCodes = true;
+  recoverySpeakBtn.disabled = true;
+  try {
+    for (let i = 0; i < codes.length; i++) {
+      // eslint-disable-next-line no-await-in-loop
+      await speakText(`Code ${i + 1} of ${codes.length}.`);
+      // eslint-disable-next-line no-await-in-loop
+      await speakCode(codes[i]);
+    }
+    announcePolite("All recovery codes read. Select the button again to hear them once more.");
+  } catch {
+    renderAlert(alertRegion, "Could not read the codes aloud.", "Download or copy the codes instead.");
+  } finally {
+    readingRecoveryCodes = false;
+    recoverySpeakBtn.disabled = false;
+  }
+});
+
+recoveryDownloadBtn.addEventListener("click", () => {
+  const blob = new Blob([recoveryCodesText() + "\n"], { type: "text/plain" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "recovery-codes.txt";
+  a.click();
+  URL.revokeObjectURL(a.href);
+  announcePolite("Recovery codes downloaded as recovery-codes.txt.");
+});
+
+recoveryCopyBtn.addEventListener("click", async () => {
+  try {
+    await navigator.clipboard.writeText(recoveryCodesText());
+    announcePolite("Recovery codes copied. Paste them into your password manager.");
+  } catch {
+    renderAlert(alertRegion, "Could not copy to the clipboard.", "Download the codes as a text file instead.");
+  }
+});
+
+// PDF §9.2 — enrolment does not complete until one code is entered back,
+// verifying capture rather than mere rendering.
+recoveryDoneBtn.addEventListener("click", async () => {
+  alertRegion.innerHTML = "";
+  try {
+    await api<{ captured: boolean }>("/recovery/codes/confirm", { code: recoveryConfirmInput.value });
+  } catch {
+    renderAlert(
+      alertRegion,
+      "That did not match any of your recovery codes.",
+      "Check where you saved them, type one code exactly, and try again."
+    );
+    return;
+  }
   recoveryPanel.hidden = true;
   status.textContent = "Enrolment complete. Your account is active.";
-  announcePolite("Enrolment complete. You can now sign in.");
+  announcePolite("Recovery code confirmed. Enrolment complete. You can now sign in.");
   moveFocusTo(document.getElementById("page-title"));
 });
