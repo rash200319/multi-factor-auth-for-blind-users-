@@ -7,18 +7,23 @@ import { row, run } from "../db/index.js";
 import { audit } from "./audit.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const WORDLIST: string[] = JSON.parse(
-  readFileSync(join(__dirname, "..", "data", "wordlist.json"), "utf8")
-);
+// Excludes the four EFF words that contain a hyphen ("t-shirt", "yo-yo", ...)
+// — hyphen is the code's word separator, so they would make a code ambiguous.
+const WORDLIST: string[] = (
+  JSON.parse(readFileSync(join(__dirname, "..", "data", "wordlist.json"), "utf8")) as string[]
+).filter((w) => !w.includes("-"));
+
+const WORDS_PER_CODE = 3;
 
 /**
  * Three words from the EFF large wordlist (7,776 words, ~12.9 bits/word,
- * ~38.8 bits for three) — see readme.md §7.2 / PDF §7.2. Entropy is not the
- * binding constraint: the code is single-use and server-side rate-limited.
+ * ~38.8 bits for three), e.g. "harbour-violin-sandbar" — PDF §7.2. Entropy
+ * is not the binding constraint: the code is single-use and server-side
+ * rate-limited. Words rather than digits because they are easier to retain
+ * from a single spoken delivery and avoid 0/O and 1/l/I ambiguity.
  */
 export function generateStepUpCode(): string {
-  const words = [randomInt(WORDLIST.length), randomInt(WORDLIST.length), randomInt(WORDLIST.length)]
-    .map((i) => WORDLIST[i]);
+  const words = Array.from({ length: WORDS_PER_CODE }, () => WORDLIST[randomInt(WORDLIST.length)]);
   return words.join("-");
 }
 

@@ -63,3 +63,17 @@ CREATE TABLE IF NOT EXISTS audit_log (
   detail          TEXT,                      -- JSON
   created_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+-- Recovery tier 4 (readme.md §6.5 rank 4) — only reachable when the roaming
+-- security key AND written recovery codes are both unavailable. Delay +
+-- mandatory notification is the control; proof_detail is a self-reported
+-- identity statement, not verified KYC (docs/hardening-plan.md WI-3).
+CREATE TABLE IF NOT EXISTS recovery_requests (
+  id              TEXT PRIMARY KEY,
+  user_id         TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  status          TEXT NOT NULL DEFAULT 'PENDING_DELAY', -- PENDING_DELAY -> COMPLETED | CANCELLED
+  proof_detail    TEXT,                      -- JSON, self-reported statement
+  requested_at    TEXT NOT NULL DEFAULT (datetime('now')),
+  eligible_at     TEXT NOT NULL,             -- requested_at + RECOVERY_TIER4_DELAY_HOURS
+  completed_at    TEXT
+);

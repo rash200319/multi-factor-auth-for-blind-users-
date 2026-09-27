@@ -11,6 +11,7 @@ import {
   isLocked,
   devSkipSecurityKey,
 } from "../src/services/ceremonyApi.js";
+import { setNotificationChannelForTesting, type NotificationChannel } from "../src/services/notify.js";
 
 function makeUser(): string {
   const id = randomUUID();
@@ -43,26 +44,47 @@ test("account is not usable (no ACTIVE status) until all three devices + code ar
   assert.notEqual(getUser(userId)!.status, "ACTIVE");
 });
 
-test("5 consecutive step-up failures locks the account", () => {
+test("5 consecutive step-up failures locks the account", async () => {
   const userId = makeUser();
   run("UPDATE users SET status = 'ACTIVE' WHERE id = ?", [userId]);
 
   let locked = false;
   for (let i = 0; i < 5; i++) {
-    locked = recordStepUpFailure(userId);
+    locked = await recordStepUpFailure(userId);
   }
   assert.equal(locked, true);
   assert.equal(isLocked(getUser(userId)!), true);
 });
 
-test("fewer than 5 failures does not lock the account", () => {
+test("fewer than 5 failures does not lock the account", async () => {
   const userId = makeUser();
   run("UPDATE users SET status = 'ACTIVE' WHERE id = ?", [userId]);
 
   for (let i = 0; i < 4; i++) {
-    recordStepUpFailure(userId);
+    await recordStepUpFailure(userId);
   }
   assert.equal(isLocked(getUser(userId)!), false);
+});
+
+test("the 5th failure sends exactly one lockout notification; earlier failures send none", async () => {
+  const userId = makeUser();
+  run("UPDATE users SET status = 'ACTIVE' WHERE id = ?", [userId]);
+
+  const sent: { to: string; subject: string }[] = [];
+  const fake: NotificationChannel = {
+    async send(to, subject) {
+      sent.push({ to, subject });
+    },
+  };
+  setNotificationChannelForTesting(fake);
+
+  for (let i = 0; i < 4; i++) await recordStepUpFailure(userId);
+  assert.equal(sent.length, 0);
+
+  await recordStepUpFailure(userId);
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].to, `${userId}@example.test`);
+  assert.match(sent[0].subject, /locked/i);
 });
 
 test("devSkipSecurityKey advances PENDING_KEY straight to PENDING_CODE_CONFIRM", () => {

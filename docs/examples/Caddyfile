@@ -1,0 +1,14 @@
+# Reference reverse-proxy config for a real (non-localhost) deployment —
+# see docs/deployment.md. Caddy gets automatic Let's Encrypt TLS from this
+# alone; adjust the routing split below to match how client/server are
+# actually deployed (this assumes the client's built static files are
+# served by Caddy itself and the API is proxied to the Node process).
+
+your-domain.example {
+	handle /register/* /auth/* /stepup/* /recovery/* /me /logout /health {
+		reverse_proxy localhost:4000
+	}
+	handle {
+		reverse_proxy localhost:5190
+	}
+}

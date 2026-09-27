@@ -9,7 +9,14 @@ import { row, run, rows } from "../db/index.js";
 import { RP_ID, ORIGIN, CHALLENGE_TTL_SECONDS } from "../config.js";
 import { audit } from "../services/audit.js";
 import { evaluateRisk } from "../services/riskEngine.js";
-import { issueSession, sessionCookieName, sessionCookieOptions } from "../services/session.js";
+import {
+  issueSession,
+  issueStepUpTicket,
+  sessionCookieName,
+  sessionCookieOptions,
+  stepupTicketCookieName,
+  stepupTicketCookieOptions,
+} from "../services/session.js";
 import { getUser, isLocked } from "../services/ceremonyApi.js";
 
 export const authRouter = Router();
@@ -119,5 +126,10 @@ authRouter.post("/finish", async (req, res) => {
     return res.json({ result: "session_established", accountStatus: user.status });
   }
 
-  return res.json({ result: "step_up_required", userId: user.id });
+  // No login session yet — issue the narrower pending-step-up ticket
+  // instead so /stepup/* can authorize this browser without trusting a
+  // client-supplied userId (docs/hardening-plan.md WI-1).
+  const ticket = await issueStepUpTicket(user.id);
+  res.cookie(stepupTicketCookieName, ticket, stepupTicketCookieOptions);
+  return res.json({ result: "step_up_required" });
 });

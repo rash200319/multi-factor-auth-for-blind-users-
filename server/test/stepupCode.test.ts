@@ -10,7 +10,7 @@ function makeUser(): string {
   return id;
 }
 
-test("generateStepUpCode produces three hyphen-separated words", () => {
+test("generateStepUpCode produces three hyphen-separated words (PDF §7.2)", () => {
   const code = generateStepUpCode();
   const parts = code.split("-");
   assert.equal(parts.length, 3);
