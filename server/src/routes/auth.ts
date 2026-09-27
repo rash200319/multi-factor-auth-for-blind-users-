@@ -56,11 +56,24 @@ authRouter.post("/finish", async (req, res) => {
   }>("SELECT * FROM credentials WHERE cred_id = ?", [credIdB64]);
   if (!cred) {
     audit(null, "auth.finish.unknown_credential");
-    return res.status(400).json({ error: "unknown credential" });
+    return res.status(400).json({
+      error: "unknown_credential",
+      message:
+        "No passkey for this site matched your account. Create an account first, or sign in from a device you already registered.",
+    });
   }
 
   const user = getUser(cred.user_id);
   if (!user) return res.status(400).json({ error: "unknown user" });
+  if (user.status !== "ACTIVE") {
+    audit(user.id, "auth.finish.not_active", { status: user.status });
+    return res.status(403).json({
+      error: "account_not_ready",
+      message:
+        "This account has not finished enrolment yet. Complete Create account (devices + security code) before signing in.",
+      accountStatus: user.status,
+    });
+  }
   if (isLocked(user)) {
     audit(user.id, "auth.finish.locked_out");
     return res.status(423).json({ error: "account locked", lockedUntil: user.locked_until });
@@ -112,12 +125,32 @@ authRouter.post("/finish", async (req, res) => {
   });
 
   audit(user.id, "auth.finish.ok", { deviceLabel: cred.device_label, risk, operation: operation ?? null });
-
-  if (risk === "low") {
-    const token = await issueSession(user.id, "aal2");
-    res.cookie(sessionCookieName, token, sessionCookieOptions);
-    return res.json({ result: "session_established", accountStatus: user.status });
+  if (cred.device_label === "security_key") {
+    console.log(
+      `[security-key] used for sign-in (user=${user.id.slice(0, 8)}…, risk=${risk})`
+    );
   }
 
-  return res.json({ result: "step_up_required", userId: user.id });
+  // Always establish an authenticated session first. Step-up only *elevates*
+  // an already-authenticated session (design: code is not a standalone entry).
+  const token = await issueSession(user.id, "aal2");
+  res.cookie(sessionCookieName, token, sessionCookieOptions);
+
+  if (risk === "low") {
+    return res.json({
+      result: "session_established",
+      userId: user.id,
+      displayName: user.display_name,
+      accountStatus: user.status,
+      aal: "aal2",
+    });
+  }
+
+  return res.json({
+    result: "step_up_required",
+    userId: user.id,
+    displayName: user.display_name,
+    accountStatus: user.status,
+    aal: "aal2",
+  });
 });

@@ -57,7 +57,10 @@ export async function readSession(token: string): Promise<SessionClaims | null> 
 // cookie-setting response to itself be over HTTPS. Set COOKIE_SAMESITE=none
 // and COOKIE_SECURE=true in server/.env for that scenario (see docs in
 // tools/README.md); leave both unset for ordinary localhost dev.
-const sameSite = (process.env.COOKIE_SAMESITE as "strict" | "lax" | "none" | undefined) ?? "strict";
+// Lax (not Strict) so cross-port localhost (5190 → 4000) reliably stores the
+// session cookie after fetch(..., { credentials: "include" }). Use
+// COOKIE_SAMESITE=none + COOKIE_SECURE=true for HTTPS tunnel phone testing.
+const sameSite = (process.env.COOKIE_SAMESITE as "strict" | "lax" | "none" | undefined) ?? "lax";
 const secure = process.env.COOKIE_SECURE === "true" || process.env.NODE_ENV === "production" || sameSite === "none";
 
 export const sessionCookieName = SESSION_COOKIE;

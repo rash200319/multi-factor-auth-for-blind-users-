@@ -9,7 +9,9 @@ export async function api<T = any>(path: string, body?: unknown): Promise<T> {
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    const err = new Error(data?.error ?? `request failed: ${res.status}`) as Error & { data?: unknown; status?: number };
+    const err = new Error(
+      data?.message ?? data?.error ?? `request failed: ${res.status}`
+    ) as Error & { data?: any; status?: number };
     err.data = data;
     err.status = res.status;
     throw err;
@@ -20,16 +22,22 @@ export async function api<T = any>(path: string, body?: unknown): Promise<T> {
 /**
  * WebAuthn calls (`startRegistration`/`startAuthentication`) throw a
  * DOMException with a specific `.name`, not a generic Error — this turns
- * that into a message that actually says what happened, instead of every
- * failure looking the same. The most common one in practice: a cross-device
- * phone registration (QR + Bluetooth) taking longer than the ceremony
- * allows, which surfaces as NotAllowedError.
+ * that into a message that actually says what happened.
  */
 export function describeAuthenticatorError(err: unknown): string {
-  const e = err as { name?: string; message?: string; status?: number; data?: { error?: string } };
+  const e = err as {
+    name?: string;
+    message?: string;
+    status?: number;
+    data?: { error?: string; message?: string; reason?: string };
+  };
 
   if (e?.name === "NotAllowedError") {
-    return "The device did not respond in time, or the prompt was dismissed. If you're pairing a phone, the QR/Bluetooth handshake can take a while on the first try — retry and keep both devices unlocked and nearby.";
+    return (
+      "No passkey was used — either none is registered for this site on this device, " +
+      "or the Windows prompt was cancelled. Create an account first, or choose “Windows Hello / this device” " +
+      "instead of a USB security key if that dialog appears."
+    );
   }
   if (e?.name === "InvalidStateError") {
     return "This authenticator is already registered to this account.";
@@ -44,8 +52,13 @@ export function describeAuthenticatorError(err: unknown): string {
     return "The request was cancelled.";
   }
   if (e?.status) {
-    // A rejection from our own API, not from the browser's WebAuthn call.
-    return e.data?.error ?? e.message ?? `The server rejected the request (${e.status}).`;
+    return (
+      e.data?.message ??
+      e.data?.reason ??
+      e.data?.error ??
+      e.message ??
+      `The server rejected the request (${e.status}).`
+    );
   }
   return e?.message ?? "Something went wrong.";
 }
@@ -54,7 +67,9 @@ export async function apiGet<T = any>(path: string): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, { credentials: "include" });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    const err = new Error(data?.error ?? `request failed: ${res.status}`) as Error & { data?: unknown; status?: number };
+    const err = new Error(
+      data?.message ?? data?.error ?? `request failed: ${res.status}`
+    ) as Error & { data?: any; status?: number };
     err.data = data;
     err.status = res.status;
     throw err;

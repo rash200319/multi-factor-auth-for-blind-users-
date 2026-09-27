@@ -66,8 +66,9 @@ function synthesize(text: string, rate: number): Promise<void> {
  * ever called after verifyPrivateAudioRoute() has passed.
  */
 export function speakCode(code: string): Promise<void> {
-  const spoken = code.split("-").join(", "); // pause between words for clarity
-  return synthesize(spoken, 0.9);
+  // Speak digit-by-digit with pauses so "580321" is clear over headphones
+  const digits = code.replace(/\D/g, "").split("").join(", ");
+  return synthesize(digits, 0.85);
 }
 
 /**

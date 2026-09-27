@@ -1,25 +1,21 @@
 import { randomInt } from "node:crypto";
 import { hash, verify } from "@node-rs/argon2";
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
 import { row, run } from "../db/index.js";
 import { audit } from "./audit.js";
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const WORDLIST: string[] = JSON.parse(
-  readFileSync(join(__dirname, "..", "data", "wordlist.json"), "utf8")
-);
-
 /**
- * Three words from the EFF large wordlist (7,776 words, ~12.9 bits/word,
- * ~38.8 bits for three) — see readme.md §7.2 / PDF §7.2. Entropy is not the
- * binding constraint: the code is single-use and server-side rate-limited.
+ * Six-digit numeric code (NIST SP 800-63B verifier-assigned memorised
+ * secret floor). Entropy is not the binding constraint: the code is
+ * single-use and server-side rate-limited (readme.md §7.2).
  */
 export function generateStepUpCode(): string {
-  const words = [randomInt(WORDLIST.length), randomInt(WORDLIST.length), randomInt(WORDLIST.length)]
-    .map((i) => WORDLIST[i]);
-  return words.join("-");
+  // 000000–999999, always exactly six digits
+  return String(randomInt(0, 1_000_000)).padStart(6, "0");
+}
+
+/** Normalise user entry: digits only, so "123 456" and "123-456" still match. */
+export function normalizeStepUpCode(submitted: string): string {
+  return submitted.replace(/\D/g, "");
 }
 
 /**
@@ -73,7 +69,7 @@ export async function verifyAndConsumeStepUpCode(
     return "already_consumed";
   }
 
-  const ok = await verify(rec.code_hash, submittedCode.trim().toLowerCase());
+  const ok = await verify(rec.code_hash, normalizeStepUpCode(submittedCode));
   if (!ok) {
     audit(userId, "stepup.verify.mismatch", { generation: rec.generation });
     return "mismatch";
@@ -98,7 +94,7 @@ export async function confirmStepUpCodeCapture(userId: string, repeatedCode: str
     [userId]
   );
   if (!rec || rec.consumed) return false;
-  const ok = await verify(rec.code_hash, repeatedCode.trim().toLowerCase());
+  const ok = await verify(rec.code_hash, normalizeStepUpCode(repeatedCode));
   audit(userId, ok ? "stepup.capture.confirmed" : "stepup.capture.mismatch");
   return ok;
 }

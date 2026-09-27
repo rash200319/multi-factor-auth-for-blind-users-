@@ -60,7 +60,20 @@ stepupRouter.post("/confirm-capture", async (req, res) => {
     confirmFirstStepUpCode(userId); // -> ACTIVE
   }
   const updated = getUser(userId)!;
-  res.json({ captured: true, accountStatus: updated.status });
+
+  // Enrolment complete → sign the user in so the UI can show Sign out immediately.
+  if (updated.status === "ACTIVE") {
+    const token = await issueSession(userId, "aal2");
+    res.cookie(sessionCookieName, token, sessionCookieOptions);
+  }
+
+  res.json({
+    captured: true,
+    accountStatus: updated.status,
+    signedIn: updated.status === "ACTIVE",
+    displayName: updated.display_name,
+    aal: updated.status === "ACTIVE" ? "aal2" : undefined,
+  });
 });
 
 /**
@@ -129,6 +142,7 @@ stepupRouter.post("/key/begin", async (req, res) => {
     expiresAt: Date.now() + CHALLENGE_TTL_SECONDS * 1000,
   });
   audit(userId, "stepup.key.begin");
+  console.log(`[security-key] step-up challenge issued — waiting for USB/NFC key (user=${userId.slice(0, 8)}…)`);
   res.json({ attemptId, options });
 });
 
@@ -173,6 +187,9 @@ stepupRouter.post("/key/finish", async (req, res) => {
   run("UPDATE credentials SET sign_count = ? WHERE id = ?", [verification.authenticationInfo.newCounter, cred.id]);
   resetStepUpFailures(pending.userId);
   audit(pending.userId, "stepup.key.ok");
+  console.log(
+    `[security-key] VERIFIED — step-up complete, session elevated (user=${pending.userId.slice(0, 8)}…, signCount=${verification.authenticationInfo.newCounter})`
+  );
 
   const token = await issueSession(pending.userId, "aal2-elevated");
   res.cookie(sessionCookieName, token, sessionCookieOptions);
