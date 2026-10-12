@@ -27,6 +27,11 @@ export function generateStepUpCode(): string {
   return words.join("-");
 }
 
+/** Normalise user entry: trim + lowercase, so stray spacing/casing still matches. */
+export function normalizeStepUpCode(submitted: string): string {
+  return submitted.trim().toLowerCase();
+}
+
 /**
  * Issue a fresh code for a user, replacing any prior one, and bump the
  * generation counter. Returns the plaintext code — caller is responsible
@@ -78,7 +83,7 @@ export async function verifyAndConsumeStepUpCode(
     return "already_consumed";
   }
 
-  const ok = await verify(rec.code_hash, submittedCode.trim().toLowerCase());
+  const ok = await verify(rec.code_hash, normalizeStepUpCode(submittedCode));
   if (!ok) {
     audit(userId, "stepup.verify.mismatch", { generation: rec.generation });
     return "mismatch";
@@ -103,7 +108,7 @@ export async function confirmStepUpCodeCapture(userId: string, repeatedCode: str
     [userId]
   );
   if (!rec || rec.consumed) return false;
-  const ok = await verify(rec.code_hash, repeatedCode.trim().toLowerCase());
+  const ok = await verify(rec.code_hash, normalizeStepUpCode(repeatedCode));
   audit(userId, ok ? "stepup.capture.confirmed" : "stepup.capture.mismatch");
   return ok;
 }

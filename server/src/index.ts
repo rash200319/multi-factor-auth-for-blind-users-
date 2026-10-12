@@ -2,6 +2,7 @@ import express from "express";
 import cors from "cors";
 import cookieParser from "cookie-parser";
 import { PORT, ORIGIN } from "./config.js";
+import { accountRouter } from "./routes/account.js";
 import { registerRouter } from "./routes/register.js";
 import { authRouter } from "./routes/auth.js";
 import { stepupRouter } from "./routes/stepup.js";
@@ -17,6 +18,7 @@ app.use(cookieParser());
 
 app.get("/health", (_req, res) => res.json({ ok: true }));
 
+app.use("/account", accountRouter);
 app.use("/register", registerRouter);
 app.use("/auth", authRouter);
 app.use("/stepup", stepupRouter);

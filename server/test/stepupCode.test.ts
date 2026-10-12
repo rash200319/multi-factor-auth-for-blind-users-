@@ -32,7 +32,8 @@ test("a wrong code is rejected without consuming the real one", async () => {
   const userId = makeUser();
   const { code } = await issueStepUpCode(userId);
 
-  const wrong = await verifyAndConsumeStepUpCode(userId, "not-the-right-code");
+  const bogus = code === "not-the-right-code" ? "also-not-the-right-code" : "not-the-right-code";
+  const wrong = await verifyAndConsumeStepUpCode(userId, bogus);
   assert.equal(wrong, "mismatch");
 
   const right = await verifyAndConsumeStepUpCode(userId, code);

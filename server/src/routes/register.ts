@@ -29,7 +29,19 @@ registerRouter.post("/start-account", (req, res) => {
   if (!displayName) return res.status(400).json({ error: "displayName is required" });
   if (!EMAIL_RE.test(email)) return res.status(400).json({ error: "a valid email is required" });
   if (getUserByEmail(email)) {
-    return res.status(409).json({ error: "an account with this email already exists" });
+    const existing = getUserByEmail(email)!;
+    const pending = ["PENDING_LAPTOP", "PENDING_PHONE", "PENDING_KEY", "PENDING_CODE_CONFIRM"].includes(
+      existing.status
+    );
+    return res.status(409).json({
+      error: "an account with this email already exists",
+      canResume: pending,
+      status: existing.status,
+      userId: pending ? existing.id : undefined,
+      message: pending
+        ? "Enrolment was started but not finished. Use Resume enrolment with this email."
+        : "An account with that email already exists. Sign in instead, or use Recover account if you lost your devices.",
+    });
   }
 
   const userId = randomUUID();
@@ -103,8 +115,18 @@ registerRouter.post("/begin", async (req, res) => {
     [userId, options.challenge, expiresAt]
   );
 
+  // WebAuthn Level 3 hint — steers Chrome/Edge toward the phone QR / hybrid
+  // sheet instead of a USB security-key prompt on the phone enrolment step.
+  // SimpleWebAuthn v10 does not expose `hints` yet, so attach it here.
+  const optionsWithHints =
+    deviceLabel === "phone"
+      ? { ...options, hints: ["hybrid"] as const }
+      : deviceLabel === "security_key"
+        ? { ...options, hints: ["security-key"] as const }
+        : options;
+
   audit(userId, "register.begin", { deviceLabel });
-  res.json({ options, deviceLabel });
+  res.json({ options: optionsWithHints, deviceLabel });
 });
 
 /**
@@ -217,6 +239,11 @@ registerRouter.post("/finish", async (req, res) => {
   }
   const updated = getUser(userId)!;
   audit(userId, "register.finish.ok", { deviceLabel });
+  if (deviceLabel === "security_key") {
+    console.log(
+      `[security-key] REGISTERED — roaming recovery key saved (user=${userId.slice(0, 8)}…, status=${updated.status})`
+    );
+  }
 
   res.json({ registered: true, deviceLabel, accountStatus: updated.status });
 });
