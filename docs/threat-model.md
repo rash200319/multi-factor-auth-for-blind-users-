@@ -1,6 +1,6 @@
 # Threat Model (summary)
 
-Full detail: `GROUP_Unified_Design.pdf` §4. This file is the quick-reference
+Full detail: `computer_security.pdf` §4. This file is the quick-reference
 version, kept next to the code it constrains.
 
 ## Adversaries
@@ -39,7 +39,7 @@ version, kept next to the code it constrains.
 | T5 (network attacker) | TLS termination (deploy-time) + `rp_id_hash`/origin binding | Standard WebAuthn/TLS properties |
 | T6 (SIM swap) | N/A by construction | No SMS anywhere in the codebase — grep confirms |
 | T7 (credential stuffing) | N/A by construction | No password field exists |
-| T8 (support-desk social engineering) | `server/src/routes/recovery.ts` | No human-override path; recovery requires either the registered device, key, or written codes |
+| T8 (support-desk social engineering) | `server/src/routes/recovery.ts`, `server/src/services/recoveryTier4.ts` | No human-override path anywhere, including last-resort recovery tier 4: it is fully automated (mandatory delay + notification), never a support-agent judgment call — the delay is what lets the real owner object, not a human evaluating the request |
 | Authenticator cloning | `server/src/routes/auth.ts` — `signCount` monotonicity check | Hard deny (not step-up) on a non-increasing counter |
 | Replay of an assertion | `server/src/routes/auth.ts`, `stepup.ts` — single-use, TTL-bound nonces | `challenges` table, `anonChallenges`/`keyChallenges` maps |
 | Replay of a step-up code | `server/src/services/stepupCode.ts` | `consumed` flag flipped before any other side effect |

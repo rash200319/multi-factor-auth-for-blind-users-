@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { run } from "../src/db/index.js";
-import { issueRecoveryCodeSet, verifyAndConsumeRecoveryCode } from "../src/services/recoveryCodes.js";
+import { confirmRecoveryCodeCapture, issueRecoveryCodeSet, verifyAndConsumeRecoveryCode } from "../src/services/recoveryCodes.js";
 
 function makeUser(): string {
   const id = randomUUID();
@@ -42,4 +42,21 @@ test("reissuing a set invalidates the previous one", async () => {
 
   const result = await verifyAndConsumeRecoveryCode(userId, firstSet[0]);
   assert.equal(result, "no_match");
+});
+
+test("recovery codes are four hyphen-separated words (PDF §9.2)", async () => {
+  const userId = makeUser();
+  const codes = await issueRecoveryCodeSet(userId);
+  for (const code of codes) assert.equal(code.split("-").length, 4);
+});
+
+test("confirmRecoveryCodeCapture matches without consuming the set", async () => {
+  const userId = makeUser();
+  const codes = await issueRecoveryCodeSet(userId);
+
+  assert.equal(await confirmRecoveryCodeCapture(userId, codes[3]), true);
+  assert.equal(await confirmRecoveryCodeCapture(userId, "not-a-real-recovery-code"), false);
+
+  // Capture confirmation must not spend anything — real recovery still works.
+  assert.equal(await verifyAndConsumeRecoveryCode(userId, codes[0]), "ok");
 });

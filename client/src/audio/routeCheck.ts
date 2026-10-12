@@ -31,7 +31,8 @@ export async function detectAudioOutputDevice(): Promise<boolean> {
 
 /**
  * Combines the weak device signal with an explicit, deliberate user action
- * (a checked confirmation checkbox passed in by the caller). Neither signal
+ * (pressing a button labelled "I'm wearing headphones — ...", passed in by
+ * the caller). Neither signal
  * alone is trusted — see AS-5/AS-6 in the design PDF: containment is a
  * physical property of hardware the system does not control, so this
  * function can only ever produce a declared control, not a proof.

@@ -15,9 +15,9 @@ const signinControls = $("signin-controls");
 const sessionPanel = $("session-panel");
 const stepupPanel = $("stepup-panel");
 const stepupHeading = $("stepup-heading");
-const headphoneConfirm = $<HTMLInputElement>("headphone-confirm");
 const speakCodeBtn = $<HTMLButtonElement>("speak-code-btn");
 const codeInput = $<HTMLInputElement>("code-input");
+const codeInputLabel = $("code-input-label");
 const verifyCodeBtn = $<HTMLButtonElement>("verify-code-btn");
 const useKeyInsteadBtn = $<HTMLButtonElement>("use-key-instead-btn");
 const lookupEmail = $<HTMLInputElement>("lookup-email");
@@ -25,25 +25,29 @@ const lookupBtn = $<HTMLButtonElement>("lookup-btn");
 const lookupResult = $("lookup-result");
 const alertRegion = $("alert-region");
 
-let pendingUserId: string | null = null;
+// The server never tells the client a userId for a pending step-up — it's
+// carried in the mfa_stepup_ticket cookie instead (credentials: "include"
+// on every request already sends it). No login session exists yet at this
+// point either (docs/hardening-plan.md WI-1), so showSignedIn()/`/me` has
+// nothing to report until step-up actually completes — these two booleans
+// are purely local UI state, not auth state.
+let stepUpPending = false;
 let awaitingNextCodeConfirm = false;
 
 moveFocusTo(document.getElementById("page-title"));
 
-async function showSignedIn(opts?: { keepStepUp?: boolean }) {
+async function showSignedIn() {
   const me = await refreshSessionUi({
     panel: sessionPanel,
     signInControls: signinControls,
     onSignedOut: () => {
-      pendingUserId = null;
+      stepUpPending = false;
       awaitingNextCodeConfirm = false;
       stepupPanel.hidden = true;
       status.textContent = "Ready to sign in.";
     },
   });
-  if (me.authenticated && !opts?.keepStepUp) {
-    stepupPanel.hidden = true;
-  }
+  if (me.authenticated) stepupPanel.hidden = true;
   return me;
 }
 
@@ -107,24 +111,21 @@ signinBtn.addEventListener("click", async () => {
     const { attemptId, options } = await api<{ attemptId: string; options: any }>("/auth/begin");
     announcePolite("Touch your fingerprint sensor now, or choose your phone passkey if this is a new laptop.");
     const response = await startAuthentication(options);
-    const result = await api<{
-      result: string;
-      userId?: string;
-      displayName?: string;
-    }>("/auth/finish", { attemptId, response });
+    const result = await api<{ result: string; accountStatus?: string }>("/auth/finish", {
+      attemptId,
+      response,
+    });
 
     if (result.result === "session_established") {
-      pendingUserId = result.userId ?? null;
       status.textContent = "Signed in.";
       announcePolite("Signed in successfully.");
       await showSignedIn();
       moveFocusTo(document.getElementById("session-heading"));
     } else if (result.result === "step_up_required") {
-      pendingUserId = result.userId!;
-      status.textContent = "Signed in. Additional verification is required.";
-      await showSignedIn({ keepStepUp: true });
+      stepUpPending = true;
+      status.textContent = "Signed in with your device. Additional verification is required.";
       stepupPanel.hidden = false;
-      announcePolite("Signed in. Additional verification is required.");
+      announcePolite("Signed in with your device. Additional verification is required.");
       moveFocusTo(stepupHeading);
     }
   } catch (err: any) {
@@ -147,61 +148,89 @@ signinBtn.addEventListener("click", async () => {
   }
 });
 
+/**
+ * Rotation phase (PDF §6.2 step 7b.iv): the session is already elevated and
+ * a fresh code must be captured for next time. Called with the code /verify
+ * returned, or with one fetched via /stepup/challenge when the user asks to
+ * hear a new one.
+ */
+async function deliverNextCode(code: string) {
+  awaitingNextCodeConfirm = true;
+  codeInputLabel.textContent = "Your new security code, as you just heard it";
+  verifyCodeBtn.textContent = "Confirm new code";
+  speakCodeBtn.hidden = false;
+  announcePolite("Speaking your next security code. Memorise it — you will need it next time.");
+  await speakCode(code);
+  announcePolite("Enter the code you just heard to confirm you captured it.");
+  codeInput.focus();
+}
+
+// The private-route declaration (PDF §13.2: a self-declared control) is the
+// button press itself — each speaking button's label begins "I'm wearing
+// headphones", so there is no separate checkbox to find and tick first.
+const DECLARED_BY_BUTTON = true;
+
+function refuseWithoutPrivateRoute() {
+  // PDF §6.2 step 7b.i — refusal over degradation: never speak without a
+  // verified private route; the security key is the remedy, so focus goes
+  // straight to it rather than leaving the user to hunt for it.
+  renderAlert(
+    alertRegion,
+    "We cannot continue with a spoken security code without a private audio route.",
+    "Use your security key instead — it is selected now."
+  );
+  if (!useKeyInsteadBtn.hidden) useKeyInsteadBtn.focus();
+}
+
+// Only reachable once the session is elevated (after the code or the key) —
+// the server refuses to speak a code to a browser that has not yet passed
+// step-up, because C_n must come from the user's memory.
 speakCodeBtn.addEventListener("click", async () => {
-  if (!pendingUserId) return;
   alertRegion.innerHTML = "";
-  const route = await verifyPrivateAudioRoute(headphoneConfirm.checked);
-  if (!route.verified) {
-    renderAlert(
-      alertRegion,
-      "Headphones not confirmed.",
-      "Check the box, or use your security key instead."
-    );
-    return;
-  }
+  await verifyPrivateAudioRoute(DECLARED_BY_BUTTON);
+
   try {
     const { code } = await api<{ code: string }>("/stepup/challenge", {
-      userId: pendingUserId,
       privateRouteConfirmed: true,
     });
-    announcePolite("Speaking your security code now.");
-    await speakCode(code);
-    announcePolite("Code spoken. Enter the six digits below.");
-    codeInput.focus();
+    await deliverNextCode(code);
   } catch (err: any) {
     if (err?.status === 409) {
-      renderAlert(alertRegion, "Private audio not confirmed.", "Use your security key instead.");
+      refuseWithoutPrivateRoute();
+    } else if (err?.status === 429) {
+      renderAlert(alertRegion, "Too many attempts.", "Wait a few minutes before requesting another code.");
     } else {
-      renderAlert(alertRegion, "Could not issue a security code.", "Try again in a moment.");
+      renderAlert(alertRegion, "Could not issue a new security code.", "Try again in a moment.");
     }
   }
 });
 
+function finishRotation() {
+  awaitingNextCodeConfirm = false;
+  stepUpPending = false;
+  codeInputLabel.textContent = "Your current security code, from memory";
+  verifyCodeBtn.textContent = "I’m wearing headphones — verify code";
+  speakCodeBtn.hidden = true;
+  codeInput.value = "";
+}
+
 verifyCodeBtn.addEventListener("click", async () => {
-  if (!pendingUserId) return;
+  if (!stepUpPending && !awaitingNextCodeConfirm) return;
   alertRegion.innerHTML = "";
   try {
     if (!awaitingNextCodeConfirm) {
-      const result = await api<{ result: string; nextCode?: string | null; locked?: boolean }>(
+      await verifyPrivateAudioRoute(DECLARED_BY_BUTTON);
+      const result = await api<{ result: string; nextCode?: string; locked?: boolean }>(
         "/stepup/verify",
-        { userId: pendingUserId, code: codeInput.value, privateRouteConfirmed: headphoneConfirm.checked }
+        { code: codeInput.value, privateRouteConfirmed: true }
       );
       if (result.result === "ok") {
         status.textContent = "Verified. You are fully signed in.";
         announcePolite("Security code verified. You are fully signed in.");
         codeInput.value = "";
+        useKeyInsteadBtn.hidden = true;
         await showSignedIn();
-        if (result.nextCode) {
-          awaitingNextCodeConfirm = true;
-          stepupPanel.hidden = false;
-          announcePolite("Speaking your next security code for next time.");
-          await speakCode(result.nextCode);
-          announcePolite("Enter the new code to confirm you heard it.");
-          verifyCodeBtn.textContent = "Confirm next code";
-          codeInput.focus();
-        } else {
-          moveFocusTo(document.getElementById("session-heading"));
-        }
+        await deliverNextCode(result.nextCode!);
       } else {
         renderAlert(
           alertRegion,
@@ -213,38 +242,49 @@ verifyCodeBtn.addEventListener("click", async () => {
       }
     } else {
       const result = await api<{ captured: boolean }>("/stepup/confirm-capture", {
-        userId: pendingUserId,
         repeatedCode: codeInput.value,
       });
-      awaitingNextCodeConfirm = false;
-      verifyCodeBtn.textContent = "Verify code";
-      codeInput.value = "";
       if (result.captured) {
-        announcePolite("Next code confirmed.");
-        await showSignedIn();
+        finishRotation();
+        announcePolite("New code confirmed and saved for your next verification.");
         moveFocusTo(document.getElementById("session-heading"));
       } else {
-        renderAlert(alertRegion, "That did not match.", "Speak the code again.");
+        renderAlert(alertRegion, "That did not match the code we spoke.", "Try typing it again, or select “I’m wearing headphones — speak a new security code” to hear a different one.");
       }
     }
-  } catch (err) {
-    renderAlert(alertRegion, "Verification failed.", describeAuthenticatorError(err));
+  } catch (err: any) {
+    if (err?.status === 409) {
+      refuseWithoutPrivateRoute();
+    } else if (err?.status === 429) {
+      renderAlert(alertRegion, "Too many attempts.", "Wait a few minutes before trying again, or use your security key instead.");
+    } else if (awaitingNextCodeConfirm && err?.status === 400) {
+      renderAlert(alertRegion, "That did not match the code we spoke.", "Try typing it again, or select “I’m wearing headphones — speak a new security code” to hear a different one.");
+    } else if (err?.status === 400) {
+      renderAlert(
+        alertRegion,
+        "That code was not recognised.",
+        err.data?.locked ? "Too many attempts — your account is now locked. Contact support." : "Try again, or use your security key instead."
+      );
+    } else {
+      renderAlert(alertRegion, "Verification failed.", describeAuthenticatorError(err));
+    }
   }
 });
 
 useKeyInsteadBtn.addEventListener("click", async () => {
-  if (!pendingUserId) return;
+  if (!stepUpPending) return;
   alertRegion.innerHTML = "";
   try {
-    const { attemptId, options } = await api<{ attemptId: string; options: any }>("/stepup/key/begin", {
-      userId: pendingUserId,
-    });
+    const { attemptId, options } = await api<{ attemptId: string; options: any }>("/stepup/key/begin");
     announcePolite("Insert and activate your registered security key now.");
     const response = await startAuthentication(options);
     const result = await api<{ result: string }>("/stepup/key/finish", { attemptId, response });
     if (result.result === "ok") {
-      status.textContent = "Verified with your security key.";
-      announcePolite("Security key verified. You are fully signed in.");
+      status.textContent = "Verified with your security key. Session elevated.";
+      announcePolite("Security key verified. You are fully signed in. If you have forgotten your spoken security code, put on headphones and select “Speak a new security code” to get a new one.");
+      stepUpPending = false;
+      useKeyInsteadBtn.hidden = true;
+      speakCodeBtn.hidden = false;
       await showSignedIn();
       moveFocusTo(document.getElementById("session-heading"));
     }

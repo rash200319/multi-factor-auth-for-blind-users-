@@ -1,21 +1,35 @@
 import { randomInt } from "node:crypto";
 import { hash, verify } from "@node-rs/argon2";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
 import { row, run } from "../db/index.js";
 import { audit } from "./audit.js";
 
+const __dirname = dirname(fileURLToPath(import.meta.url));
+// Excludes the four EFF words that contain a hyphen ("t-shirt", "yo-yo", ...)
+// — hyphen is the code's word separator, so they would make a code ambiguous.
+const WORDLIST: string[] = (
+  JSON.parse(readFileSync(join(__dirname, "..", "data", "wordlist.json"), "utf8")) as string[]
+).filter((w) => !w.includes("-"));
+
+const WORDS_PER_CODE = 3;
+
 /**
- * Six-digit numeric code (NIST SP 800-63B verifier-assigned memorised
- * secret floor). Entropy is not the binding constraint: the code is
- * single-use and server-side rate-limited (readme.md §7.2).
+ * Three words from the EFF large wordlist (7,776 words, ~12.9 bits/word,
+ * ~38.8 bits for three), e.g. "harbour-violin-sandbar" — PDF §7.2. Entropy
+ * is not the binding constraint: the code is single-use and server-side
+ * rate-limited. Words rather than digits because they are easier to retain
+ * from a single spoken delivery and avoid 0/O and 1/l/I ambiguity.
  */
 export function generateStepUpCode(): string {
-  // 000000–999999, always exactly six digits
-  return String(randomInt(0, 1_000_000)).padStart(6, "0");
+  const words = Array.from({ length: WORDS_PER_CODE }, () => WORDLIST[randomInt(WORDLIST.length)]);
+  return words.join("-");
 }
 
-/** Normalise user entry: digits only, so "123 456" and "123-456" still match. */
+/** Normalise user entry: trim + lowercase, so stray spacing/casing still matches. */
 export function normalizeStepUpCode(submitted: string): string {
-  return submitted.replace(/\D/g, "");
+  return submitted.trim().toLowerCase();
 }
 
 /**

@@ -10,9 +10,11 @@ function makeUser(): string {
   return id;
 }
 
-test("generateStepUpCode produces a six-digit numeric code", () => {
+test("generateStepUpCode produces three hyphen-separated words (PDF §7.2)", () => {
   const code = generateStepUpCode();
-  assert.match(code, /^\d{6}$/);
+  const parts = code.split("-");
+  assert.equal(parts.length, 3);
+  for (const part of parts) assert.ok(part.length > 0);
 });
 
 test("a freshly issued code verifies once and is then rejected (single use)", async () => {
@@ -30,13 +32,9 @@ test("a wrong code is rejected without consuming the real one", async () => {
   const userId = makeUser();
   const { code } = await issueStepUpCode(userId);
 
-  const wrong = await verifyAndConsumeStepUpCode(userId, "000000");
-  // Avoid false pass if the generated code happens to be 000000
-  if (code === "000000") {
-    assert.equal(await verifyAndConsumeStepUpCode(userId, "111111"), "mismatch");
-  } else {
-    assert.equal(wrong, "mismatch");
-  }
+  const bogus = code === "not-the-right-code" ? "also-not-the-right-code" : "not-the-right-code";
+  const wrong = await verifyAndConsumeStepUpCode(userId, bogus);
+  assert.equal(wrong, "mismatch");
 
   const right = await verifyAndConsumeStepUpCode(userId, code);
   assert.equal(right, "ok");

@@ -29,7 +29,7 @@
         <li><strong>Laptop</strong> — Windows Hello / fingerprint on <em>this</em> computer.</li>
         <li><strong>Phone</strong> — scan a QR from Windows/Chrome (not drawn on this page). Use Bluetooth.</li>
         <li><strong>Security key</strong> — USB/NFC key, or skip only for local testing if enabled.</li>
-        <li><strong>Spoken code</strong> — headphones on; hear a 6-digit code and type it back.</li>
+        <li><strong>Spoken code</strong> — headphones on; hear a three-word code and type it back.</li>
         <li><strong>Written recovery codes</strong> — save them once; used only if devices are lost.</li>
       </ol>
     </section>
@@ -95,28 +95,31 @@
 
     <div id="code-confirm-panel" hidden>
       <h2 id="code-confirm-heading" tabindex="-1">Confirm your security code</h2>
-      <p>Put on headphones. We speak a <strong>6-digit</strong> code (never shown on screen). Type it back to prove you heard it.</p>
-      <div class="field">
-        <label for="headphone-confirm-enrol">
-          <input type="checkbox" id="headphone-confirm-enrol" />
-          I am wearing headphones or a private headset right now
-        </label>
-      </div>
+      <p>Put on headphones, then we will speak your first security code. Repeat it back to prove you captured it correctly. Write it down somewhere private if you want a backup — it will not be shown on screen.</p>
       <div class="actions">
-        <button id="speak-first-code-btn" type="button">Speak my security code</button>
+        <button id="speak-first-code-btn" type="button">I’m wearing headphones — speak my security code</button>
       </div>
       <div class="field">
-        <label for="repeat-code-input">Type the 6-digit code you heard</label>
-        <input type="text" id="repeat-code-input" inputmode="numeric" autocomplete="off" placeholder="e.g. 580321" />
+        <label for="repeat-code-input">Type the code back</label>
+        <input type="text" id="repeat-code-input" autocomplete="off" placeholder="e.g. harbour-violin-sandbar" />
       </div>
       <button id="confirm-capture-btn" type="button">Confirm code</button>
     </div>
 
     <div id="recovery-codes-panel" hidden>
       <h2 tabindex="-1" id="recovery-codes-heading">Your written recovery codes</h2>
-      <p>Save these somewhere private. They are shown once. Use them only if laptop, phone, and security key are all unavailable.</p>
+      <p>These eight codes are given to you once. Save them somewhere private (password manager, refreshable braille display, or printed and stored securely). If you are wearing headphones, we can also read them aloud. Each code works once; using any one invalidates the rest.</p>
       <ul id="recovery-codes-list"></ul>
-      <button id="recovery-codes-done-btn" type="button">I have saved my recovery codes</button>
+      <div class="actions">
+        <button id="recovery-codes-speak-btn" type="button">I’m wearing headphones — read my recovery codes aloud</button>
+        <button id="recovery-codes-download-btn" type="button" class="secondary">Download codes as a text file</button>
+        <button id="recovery-codes-copy-btn" type="button" class="secondary">Copy codes to clipboard</button>
+      </div>
+      <div class="field">
+        <label for="recovery-confirm-input">To finish enrolment, type any one of your recovery codes from where you saved it</label>
+        <input type="text" id="recovery-confirm-input" autocomplete="off" />
+      </div>
+      <button id="recovery-codes-done-btn" type="button">Confirm and finish enrolment</button>
       <p id="enrol-done-hint" hidden>
         Enrolment complete — you are signed in.
         <a href="/index.html">Go to Sign in</a> anytime.
